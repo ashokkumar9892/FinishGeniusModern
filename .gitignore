@@ -1,0 +1,31 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+*.suo
+
+# Secrets - never commit real connection strings / keys
+appsettings.Local.json
+appsettings.Production.json
+
+# Runtime data (uploads, logs)
+App_Data/
+logs/
+
+# Frontend
+node_modules/
+frontend/dist/
+
+# Frontend build output copied into the API
+backend/FinishGenius.Api/wwwroot/
+
+# Build / deploy output
+publish/
+dist/
+*.zip
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
