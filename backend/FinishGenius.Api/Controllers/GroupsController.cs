@@ -293,10 +293,11 @@ public class GroupsController(AppDbContext db, CurrentUser me, AuditService audi
         }
     }
 
-    private async Task<int> DefaultGroupIdAsync(List<int> accessible)
+    /// <summary>The group the user explicitly chose ("Choose"); null after "Unselect".</summary>
+    private async Task<int?> DefaultGroupIdAsync(List<int> accessible)
     {
-        var u = await db.Users.AsNoTracking().Where(x => x.Id == me.Id).Select(x => new { x.GroupId, x.DefaultGroupId }).FirstAsync();
-        return u.DefaultGroupId is int d && accessible.Contains(d) ? d : u.GroupId;
+        var d = await db.Users.AsNoTracking().Where(x => x.Id == me.Id).Select(x => x.DefaultGroupId).FirstAsync();
+        return d is int id && accessible.Contains(id) ? id : null;
     }
 
     private static string TimeZoneLabel(string id)
@@ -305,7 +306,7 @@ public class GroupsController(AppDbContext db, CurrentUser me, AuditService audi
         catch (Exception) { return id; }
     }
 
-    private object Dto(Group g, int defaultGroupId) => new
+    private object Dto(Group g, int? defaultGroupId) => new
     {
         g.Id, g.Name, g.Address1, g.Address2, g.City, g.State, g.Zip, g.Country,
         g.TimeZone, TimeZoneLabel = TimeZoneLabel(g.TimeZone),

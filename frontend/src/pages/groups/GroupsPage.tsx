@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Building2, CheckSquare, Copy, Eye, History, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Building2, CheckSquare, Copy, Eye, History, Pencil, Plus, Trash2, X } from 'lucide-react'
 import clsx from 'clsx'
 import { api, errorMessage, fileUrl } from '@/lib/api'
-import { useAuth, useMe } from '@/lib/auth'
+import { useAuth, useGroup, useMe } from '@/lib/auth'
 import { isAdmin, isSystemAdmin } from '@/lib/access'
 import { ConfirmDialog, ErrorBanner, PageHeader, Spinner } from '@/components/ui'
 import { DataTable, type Column } from '@/components/DataTable'
@@ -31,8 +31,23 @@ export default function GroupsPage() {
     queryFn: () => api.get<GroupRow[]>('/groups').then((r) => r.data),
   })
 
+  const { setGroupId } = useGroup()
+
+  // Select: make it the default group and switch the whole app (header) to it.
   const choose = useMutation({
     mutationFn: (g: GroupRow) => api.post(`/auth/default-group/${g.id}`),
+    onSuccess: async (res, g) => {
+      toast.success(res.data.message)
+      setGroupId(g.id)
+      await qc.invalidateQueries({ queryKey: ['groups'] })
+      await refresh()
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+
+  // Unselect: clear the default group.
+  const unselect = useMutation({
+    mutationFn: () => api.delete('/auth/default-group'),
     onSuccess: async (res) => {
       toast.success(res.data.message)
       await qc.invalidateQueries({ queryKey: ['groups'] })
@@ -86,8 +101,13 @@ export default function GroupsPage() {
       sortValue: (g) => (g.isDefault ? 0 : 1),
       cell: (g) =>
         g.isDefault ? (
-          <span className="badge bg-primary text-primary-foreground gap-1">
-            <CheckSquare className="h-3.5 w-3.5" /> Default
+          <span className="inline-flex items-center gap-1.5">
+            <span className="badge bg-primary text-primary-foreground gap-1">
+              <CheckSquare className="h-3.5 w-3.5" /> Default
+            </span>
+            <button className="btn-ghost btn-sm" title="Unselect this group" onClick={() => unselect.mutate()} disabled={unselect.isPending}>
+              {unselect.isPending ? <Spinner className="h-3 w-3" /> : <X className="h-3.5 w-3.5" />} Unselect
+            </button>
           </span>
         ) : (
           <button className="btn-secondary btn-sm" onClick={() => choose.mutate(g)} disabled={choose.isPending}>

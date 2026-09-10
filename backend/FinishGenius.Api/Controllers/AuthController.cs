@@ -93,4 +93,15 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
         await db.SaveChangesAsync();
         return Ok(new { message = "Default group updated." });
     }
+
+    /// <summary>"Unselect" on the Groups page: clears the chosen default group.</summary>
+    [HttpDelete("default-group")]
+    [Authorize]
+    public async Task<IActionResult> ClearDefaultGroup()
+    {
+        var user = await db.Users.FirstAsync(u => u.Id == me.Id);
+        user.DefaultGroupId = null;
+        await db.SaveChangesAsync();
+        return Ok(new { message = "Default group cleared." });
+    }
 }
