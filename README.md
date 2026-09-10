@@ -30,7 +30,7 @@ Full guide: [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md)
 
 ```powershell
 cd backend\FinishGenius.Api
-dotnet run -- import-legacy --source FGAPP --yes
+dotnet run -- import-legacy --source FGAPP_21_May_2024 --yes
 ```
 
 Copies groups, users (existing passwords keep working), materials, formulas, process steps/schedules, My Work history,

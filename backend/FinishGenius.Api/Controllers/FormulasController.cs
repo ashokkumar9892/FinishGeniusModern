@@ -438,7 +438,9 @@ public static class FormulaCalc
         decimal TotalGrams, decimal TotalPounds, decimal TotalGallons, decimal MaterialCost, decimal Price,
         decimal Voc, decimal Hap, decimal Tap, decimal CostPerGallon, decimal PricePerGallon, int IngredientCount);
 
-    public static decimal Gallons(decimal grams, decimal density) => density > 0 ? grams / (density * GramsPerPound) : 0;
+    /// <summary>Density is lb/gal; values below 3 are legacy g/cc data (the legacy column was "GramsPerCubicCentiMetres").</summary>
+    public static decimal Gallons(decimal grams, decimal density) =>
+        density > 0 ? grams / (density * (density < 3 ? 3785.41m : GramsPerPound)) : 0;
 
     public static decimal R(decimal v, int digits) => Math.Round(v, digits, MidpointRounding.AwayFromZero);
 

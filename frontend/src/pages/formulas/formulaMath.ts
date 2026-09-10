@@ -32,7 +32,9 @@ export interface FormulaTotals {
   pricePerGallon: number
 }
 
-export const gallonsOf = (grams: number, density: number) => (density > 0 ? grams / (density * GRAMS_PER_POUND) : 0)
+/** Density is lb/gal; values below 3 are legacy g/cc data (matches backend FormulaCalc.Gallons). */
+export const gallonsOf = (grams: number, density: number) =>
+  density > 0 ? grams / (density * (density < 3 ? 3785.41 : GRAMS_PER_POUND)) : 0
 
 export function computeTotals(lines: CalcLine[], markUp: number, containerPrice: number): FormulaTotals {
   let grams = 0, gallons = 0, cost = 0, voc = 0, hap = 0, tap = 0

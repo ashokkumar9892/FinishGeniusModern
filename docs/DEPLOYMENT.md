@@ -5,7 +5,7 @@ The application is **one IIS website**: the ASP.NET Core API serves the React ap
 ## 0. What you need
 
 - A Windows Server 2019/2022 VM (Google Compute Engine "Windows Server 2022 Datacenter" image works) with RDP access.
-- Network path from the VM to SQL Server `35.196.141.157:1433`
+- Network path from the VM to SQL Server `34.74.178.204:1433`
   (if SQL Server is another GCP VM, allow the web VM's internal/external IP in its firewall rule).
 - The build package produced by `build.ps1` (`publish\FinishGenius-<date>.zip`).
 
@@ -68,7 +68,7 @@ Browse to `http://<VM external IP>/` and sign in (`admin` / the `Seed:AdminPassw
 
 ```json
 {
-  "ConnectionStrings": { "Default": "Server=35.196.141.157;Database=FGApp-AshokTest;User Id=FGAPP;Password=***;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15" },
+  "ConnectionStrings": { "Default": "Server=34.74.178.204;Database=FGAPP_21_May_2024;User Id=FGAPP;Password=***;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15" },
   "Jwt": { "Key": "<long random secret, 32+ chars — keep the same value across servers/restarts>" },
   "Seed": { "AdminPassword": "<initial admin password, used only when no users exist>" },
   "Database": { "AutoMigrate": true, "SeedDemoData": true },
@@ -116,7 +116,7 @@ needs `db_owner`, or `db_ddladmin` + read/write for migrations).
 | **HTTP 502.5** | Wrong runtime — install the .NET **10** Hosting Bundle. |
 | Uploads fail | App-pool identity needs Modify on `App_Data` (or your `Storage:Root`). Large files: limit is 250 MB (`web.config` `maxAllowedContentLength`). |
 | Deep links (e.g. `/materials`) return 404 | Make sure `wwwroot\index.html` exists in the site folder (package built with `build.ps1`). |
-| Can't reach SQL Server | From the VM: `Test-NetConnection 35.196.141.157 -Port 1433`; open the SQL Server firewall for the VM IP. |
+| Can't reach SQL Server | From the VM: `Test-NetConnection 34.74.178.204 -Port 1433`; open the SQL Server firewall for the VM IP. |
 | Everyone logged out after deploy | `Jwt:Key` changed — keep it constant. |
 
 Health endpoint: `GET /api/health` → `{"status":"ok"}`.

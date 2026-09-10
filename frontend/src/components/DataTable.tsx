@@ -198,7 +198,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                           key={c.key}
                           className={clsx('td', dense && 'py-1.5', c.hideBelow && hide[c.hideBelow], c.align === 'right' && 'text-right', c.align === 'center' && 'text-center',
                             // short plain values (ids, group names, codes) stay on one line
-                            text !== null && text.length <= 24 && 'whitespace-nowrap', c.className)}
+                            text !== null && text.length <= 40 && 'whitespace-nowrap', c.className)}
                         >
                           {c.cell ? c.cell(r) : text}
                         </td>

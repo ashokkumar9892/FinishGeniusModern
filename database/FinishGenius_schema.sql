@@ -1564,3 +1564,46 @@ END;
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910211246_LegacySupport'
+)
+BEGIN
+    DROP INDEX [IX_ProcessSchedules_GroupId_Number] ON [fg].[ProcessSchedules];
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910211246_LegacySupport'
+)
+BEGIN
+    DECLARE @var nvarchar(max);
+    SELECT @var = QUOTENAME([d].[name])
+    FROM [sys].[default_constraints] [d]
+    INNER JOIN [sys].[columns] [c] ON [d].[parent_column_id] = [c].[column_id] AND [d].[parent_object_id] = [c].[object_id]
+    WHERE ([d].[parent_object_id] = OBJECT_ID(N'[fg].[MaterialCategories]') AND [c].[name] = N'GroupId');
+    IF @var IS NOT NULL EXEC(N'ALTER TABLE [fg].[MaterialCategories] DROP CONSTRAINT ' + @var + ';');
+    ALTER TABLE [fg].[MaterialCategories] ALTER COLUMN [GroupId] int NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910211246_LegacySupport'
+)
+BEGIN
+    CREATE INDEX [IX_ProcessSchedules_GroupId_Number] ON [fg].[ProcessSchedules] ([GroupId], [Number]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910211246_LegacySupport'
+)
+BEGIN
+    INSERT INTO [fg].[__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20260910211246_LegacySupport', N'10.0.12');
+END;
+
+COMMIT;
+GO
+

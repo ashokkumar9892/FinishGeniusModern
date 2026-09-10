@@ -528,9 +528,13 @@ public class ProcessSchedulesController(AppDbContext db, CurrentUser me, AuditSe
         {
             r.SquareFootage, r.ProductionHours, r.Materials, r.MaterialCostPerSqFt, r.HoursPerSqFt, r.OtherCostPerSqFt,
             TotalCost = r.Materials.Sum(m => m.Cost),
-            HasCoverage = values.Any(v => v.CalcVariable == CalcVariables.Coverage && ScheduleCalculator.Num(v.Value) > 0),
+            // Legacy tags count too: Material_Coverage (> 1; 1 is the legacy "not set" placeholder) and labour/setup minutes.
+            HasCoverage = values.Any(v => (v.CalcVariable == CalcVariables.Coverage && ScheduleCalculator.Num(v.Value) > 0)
+                                          || (v.CalcVariable == CalcVariables.MaterialCoverage && ScheduleCalculator.Num(v.Value) > 1)),
             HasMaterials = values.Any(v => v.CalcVariable == CalcVariables.MaterialId && v.MaterialId != null),
-            HasProductionRate = values.Any(v => v.CalcVariable == CalcVariables.ProductionRate && ScheduleCalculator.Num(v.Value) > 0),
+            HasProductionRate = values.Any(v => (v.CalcVariable == CalcVariables.ProductionRate
+                                                 || v.CalcVariable == CalcVariables.StepLabor || v.CalcVariable == CalcVariables.StepSetup)
+                                                && ScheduleCalculator.Num(v.Value) > 0),
         });
     }
 

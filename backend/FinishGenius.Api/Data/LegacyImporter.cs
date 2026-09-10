@@ -41,11 +41,10 @@ public class LegacyImporter(AppDbContext db, IConfiguration config, ILogger log)
     public async Task RunAsync(string sourceDb, bool confirmed)
     {
         if (!Regex.IsMatch(sourceDb, @"^[A-Za-z0-9_\-]+$")) throw new ArgumentException("Invalid source database name.");
+        // The source may be the target database itself (legacy tables in dbo, new app in fg): only fg is ever written.
         var target = db.Database.GetDbConnection().Database;
-        if (string.Equals(target, sourceDb, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The source database must be different from the target database.");
 
-        Console.WriteLine($"Legacy import: [{sourceDb}] -> [{target}] schema fg");
+        Console.WriteLine($"Legacy import: [{sourceDb}].dbo -> [{target}].fg");
         if (!confirmed)
         {
             Console.WriteLine("This DELETES all Finish Genius data (schema fg) in the target database and re-imports it from the source.");
@@ -276,14 +275,34 @@ public class LegacyImporter(AppDbContext db, IConfiguration config, ILogger log)
             INSERT INTO fg.IndustrySectors (Id, Name) SELECT c.ID, LEFT(LTRIM(RTRIM(c.ConfigName)), 400) FROM {s}ConfigurationName c;
             """));
 
-        await Exec("Sub steps", Ident("SubSteps", $"""
+        // Sub steps without a sector go to Wood. Newer legacy databases contain unused duplicate sub steps, so keep one
+        // per (sector, sequence): the one in use, then the one with a sector, then the most used.
+        const string subStepCandidates = """
             DECLARE @wood int = ISNULL((SELECT TOP 1 Id FROM fg.IndustrySectors WHERE Name = 'Wood'), (SELECT MIN(Id) FROM fg.IndustrySectors));
+            IF OBJECT_ID('tempdb..#ss') IS NOT NULL DROP TABLE #ss;
+            WITH used AS (SELECT SubStepID, COUNT(*) AS n FROM {0}FinishingStepsDetails WHERE SubStepID IS NOT NULL GROUP BY SubStepID)
+            SELECT ss.ID, ISNULL(sec.Id, @wood) AS SectorId, ISNULL(TRY_CAST(ss.Sequence AS int), ss.ID) AS Seq, ISNULL(u.n, 0) AS Used,
+                   ROW_NUMBER() OVER (PARTITION BY ISNULL(sec.Id, @wood), ISNULL(TRY_CAST(ss.Sequence AS int), ss.ID)
+                                      ORDER BY CASE WHEN ISNULL(u.n, 0) > 0 THEN 0 ELSE 1 END, CASE WHEN sec.Id IS NOT NULL THEN 0 ELSE 1 END,
+                                               ISNULL(u.n, 0) DESC, ss.ID) AS rn
+            INTO #ss
+            FROM {0}SubStep ss LEFT JOIN fg.IndustrySectors sec ON sec.Id = ss.ConfigurationID LEFT JOIN used u ON u.SubStepID = ss.ID;
+            """;
+        await Exec("Sub steps (dedupe)", string.Format(subStepCandidates, s));
+        await Exec("Sub steps", Ident("SubSteps", $"""
             INSERT INTO fg.SubSteps (Id, IndustrySectorId, UserRole, Name, ShortName, Sequence, PassThroughs, WebLink, Instruction)
-            SELECT ss.ID, ISNULL(sec.Id, @wood), LEFT(ISNULL(NULLIF(ss.UserRole, ''), 'User'), 400), LEFT(LTRIM(RTRIM(ss.Name)), 400),
-                   LEFT(LTRIM(RTRIM(ss.ShortName)), 400), ISNULL(TRY_CAST(ss.Sequence AS int), ss.ID),
+            SELECT ss.ID, c.SectorId, LEFT(ISNULL(NULLIF(ss.UserRole, ''), 'User'), 400), LEFT(LTRIM(RTRIM(ss.Name)), 400),
+                   LEFT(LTRIM(RTRIM(ss.ShortName)), 400), c.Seq,
                    CASE WHEN ss.PassThroughsNumber > 0 THEN ss.PassThroughsNumber ELSE 1 END, LEFT(ss.WebLink, 400), LEFT(ss.Instruction, 4000)
-            FROM {s}SubStep ss LEFT JOIN fg.IndustrySectors sec ON sec.Id = ss.ConfigurationID;
+            FROM {s}SubStep ss JOIN #ss c ON c.ID = ss.ID AND c.rn = 1;
             """));
+        await using (var dropped = _conn.CreateCommand())
+        {
+            dropped.CommandText = "SELECT COUNT(*), ISNULL(SUM(Used), 0) FROM #ss WHERE rn > 1";
+            await using var r = await dropped.ExecuteReaderAsync();
+            if (await r.ReadAsync() && r.GetInt32(0) > 0)
+                Console.WriteLine($"  Skipped {r.GetInt32(0)} duplicate sub steps ({r.GetInt32(1):N0} values referenced them).");
+        }
 
         await ImportPullDownsAsync();
 

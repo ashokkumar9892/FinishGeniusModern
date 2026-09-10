@@ -141,15 +141,28 @@ public class ScheduleCalculator(AppDbContext db)
     {
         var sqft = Math.Max(0, oneSided) + 2 * Math.Max(0, twoSided);
         var values = await LoadValuesAsync(scheduleId);
+        var recipes = await LoadRecipesAsync(values.Where(v => v.MaterialId != null).Select(v => v.MaterialId!.Value).Distinct().ToList());
 
         // quantity per single sq ft, keyed by material + unit ("Gallons" / "Pieces")
         var perSqFt = new Dictionary<(int materialId, string unit), decimal>();
+        void AddRaw(int materialId, string unit, decimal q)
+        {
+            var key = (materialId, unit);
+            perSqFt[key] = perSqFt.GetValueOrDefault(key) + q;
+        }
+        // Gallons of a formula are split into its ingredients by volume (the legacy report lists ingredients).
         void Add(int? materialId, string unit, decimal q)
         {
             if (materialId == null || q <= 0) return;
-            var key = (materialId.Value, unit);
-            perSqFt[key] = perSqFt.GetValueOrDefault(key) + q;
+            if (unit == "Gallons" && recipes.TryGetValue(materialId.Value, out var recipe))
+            {
+                var batch = recipe.Sum(r => r.gallons);
+                foreach (var (ingredient, gallons) in recipe) AddRaw(ingredient, unit, q * gallons / batch);
+                return;
+            }
+            AddRaw(materialId.Value, unit, q);
         }
+        decimal? RecipeGallons(int? id) => id != null && recipes.TryGetValue(id.Value, out var r) ? r.Sum(x => x.gallons) : null;
         decimal hoursPerSqFt = 0, otherPerSqFt = 0;
 
         foreach (var step in values.GroupBy(v => v.ScheduleStepId))
@@ -167,7 +180,7 @@ public class ScheduleCalculator(AppDbContext db)
                 if (rate is > 0) hoursPerSqFt += 1m / rate.Value;
                 otherPerSqFt += ordered.Where(v => v.CalcVariable == CalcVariables.CostPerSqFt).Sum(v => Num(v.Value) ?? 0);
 
-                if (ordered.Any(v => IsLegacyCalc(v.CalcVariable))) AddLegacyEntry(ordered, te, Add);
+                if (ordered.Any(v => IsLegacyCalc(v.CalcVariable))) AddLegacyEntry(ordered, te, Add, RecipeGallons);
                 else AddModernEntry(ordered, Add);
             }
         }
@@ -189,6 +202,25 @@ public class ScheduleCalculator(AppDbContext db)
         return new QuantityResult(sqft, Math.Round(sqft * hoursPerSqFt, 2), lines, materialCostPerSqFt, hoursPerSqFt, otherPerSqFt);
     }
 
+    /// <summary>Formula → its ingredients' gallons in one batch.</summary>
+    private async Task<Dictionary<int, List<(int materialId, decimal gallons)>>> LoadRecipesAsync(List<int> ids)
+    {
+        if (ids.Count == 0) return new();
+        var rows = await db.FormulaIngredients.AsNoTracking()
+            .Where(i => ids.Contains(i.FormulaId) && i.Grams > 0)
+            .Select(i => new { i.FormulaId, i.MaterialId, i.Grams, Density = i.Material!.Density })
+            .ToListAsync();
+        return rows.Where(r => r.Density > 0).GroupBy(r => r.FormulaId)
+            .ToDictionary(g => g.Key, g => g.Select(r => (r.MaterialId, GramsToGallons(r.Grams, r.Density))).ToList());
+    }
+
+    /// <summary>
+    /// Grams → gallons. Material density is lb/gal, but part of the legacy data stores g/cc (the legacy column is
+    /// "GramsPerCubicCentiMetres"); real coatings are 6–20 lb/gal or 0.6–2.5 g/cc, so values below 3 are treated as g/cc.
+    /// </summary>
+    public static decimal GramsToGallons(decimal grams, decimal density) =>
+        density <= 0 ? 0 : grams / (density * (density < 3 ? 3785.41m : 453.59237m));
+
     /// <summary>Coverage applies to the entry's materials; MixPercent belongs to the material chosen just before it.</summary>
     private static void AddModernEntry(List<ScheduleValue> ordered, Action<int?, string, decimal> add)
     {
@@ -207,17 +239,27 @@ public class ScheduleCalculator(AppDbContext db)
     }
 
     /// <summary>
-    /// Legacy rules: base gallons = 1 ÷ (Material_Coverage × gun TE); MiscN additive in fl oz/gal → base × oz ÷ 128;
-    /// in "sq ft per piece" → pieces = 1 ÷ value; in "sq ft / qt" → gallons = 1 ÷ value ÷ 4; in % → base × %.
+    /// Legacy rules (verified against the AWFI "Bamboo" test: 60 sq ft → 0.064 / 0.007 / 0.006 gal, 0.50 h):
+    /// per sq ft, a formula base uses (1 ÷ coverage ÷ gun TE) batches, split into ingredient gallons; a plain material uses
+    /// (1 ÷ coverage ÷ gun TE) × Material_Qty gallons. Coverage ≤ 1 is the legacy "not set" placeholder and is skipped.
+    /// MiscN additive in fl oz/gal → base × oz ÷ 128; in "sq ft per piece" → pieces = 1 ÷ value; in "sq ft / qt" →
+    /// gallons = 1 ÷ value ÷ 4; in % → base × %.
     /// </summary>
-    private static void AddLegacyEntry(List<ScheduleValue> ordered, decimal te, Action<int?, string, decimal> add)
+    private static void AddLegacyEntry(List<ScheduleValue> ordered, decimal te, Action<int?, string, decimal> add, Func<int?, decimal?> recipeGallons)
     {
         var coverageValue = ordered.FirstOrDefault(v => v.CalcVariable == CalcVariables.MaterialCoverage);
         var coverage = Num(coverageValue?.Value);
         var coverageIsArea = coverageValue?.Unit is not { Length: > 0 } u || u.Contains("sq", StringComparison.OrdinalIgnoreCase);
-        decimal? baseGal = coverage is > 0 && coverageIsArea ? 1m / coverage.Value / te : null;
-        if (baseGal != null)
-            add(ordered.FirstOrDefault(v => v.CalcVariable == CalcVariables.MaterialId && v.MaterialId != null)?.MaterialId, "Gallons", baseGal.Value);
+        decimal? baseGal = null;
+        if (coverage is > 1 && coverageIsArea)
+        {
+            var baseMaterial = ordered.FirstOrDefault(v => v.CalcVariable == CalcVariables.MaterialId && v.MaterialId != null)?.MaterialId;
+            var perUnit = 1m / coverage.Value / te;
+            var batch = recipeGallons(baseMaterial);
+            var materialQty = Num(ordered.FirstOrDefault(v => v.CalcVariable == CalcVariables.MaterialQty)?.Value);
+            baseGal = batch != null ? perUnit * batch.Value : perUnit * (materialQty is > 0 ? materialQty.Value : 1m);
+            add(baseMaterial, "Gallons", baseGal.Value);
+        }
 
         var pairs = ordered
             .Select(v => (v, m: v.CalcVariable == null ? Match.Empty : MiscVar.Match(v.CalcVariable)))

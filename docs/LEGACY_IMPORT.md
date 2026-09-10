@@ -27,6 +27,13 @@ dotnet FinishGenius.Api.dll import-legacy --source FGAPP --yes
 
 Without `--yes` it only prints what it would do.
 
+**Current setup:** the app runs in `FGAPP_21_May_2024` on `34.74.178.204`, which also contains the legacy tables
+(`dbo`). The source is then the same database — the new app only ever writes to the `fg` schema:
+
+```powershell
+dotnet run -- import-legacy --source FGAPP_21_May_2024 --yes
+```
+
 > **Warning:** every run first **deletes all rows in the `fg` schema** of the target database, then re-imports.
 > Other schemas (e.g. `dbo` tables that belong to other applications) are never touched.
 > Anything created in the new app since the last import is lost — import once, then work in the new app.

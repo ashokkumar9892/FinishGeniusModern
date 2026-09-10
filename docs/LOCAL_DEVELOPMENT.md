@@ -7,7 +7,7 @@
 | .NET SDK | 10.0.x | `dotnet --list-sdks` |
 | Node.js | 20+ (tested with 24) | `node -v` |
 | Git | any | `git --version` |
-| Network access to the SQL Server | port 1433 to `35.196.141.157` | `Test-NetConnection 35.196.141.157 -Port 1433` |
+| Network access to the SQL Server | port 1433 to `34.74.178.204` | `Test-NetConnection 34.74.178.204 -Port 1433` |
 
 No ODBC driver is needed — .NET uses Microsoft.Data.SqlClient directly.
 
@@ -18,7 +18,7 @@ No ODBC driver is needed — .NET uses Microsoft.Data.SqlClient directly.
 ```json
 {
   "ConnectionStrings": {
-    "Default": "Server=35.196.141.157;Database=FGApp-AshokTest;User Id=FGAPP;Password=********;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15"
+    "Default": "Server=34.74.178.204;Database=FGAPP_21_May_2024;User Id=FGAPP;Password=********;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15"
   },
   "Jwt": { "Key": "a-long-random-secret-of-at-least-32-characters" },
   "Seed": { "AdminPassword": "Admin@12345" }
