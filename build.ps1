@@ -20,7 +20,9 @@ param(
   [switch]$SkipNpmInstall
 )
 
-$ErrorActionPreference = 'Stop'
+# 'Continue' on purpose: Windows PowerShell 5.1 turns harmless stderr output of native tools (npm/vite warnings)
+# into terminating errors under 'Stop'. Failures are detected through $LASTEXITCODE below instead.
+$ErrorActionPreference = 'Continue'
 $root = $PSScriptRoot
 $api = Join-Path $root 'backend\FinishGenius.Api'
 $out = Join-Path $root 'publish\FinishGenius'

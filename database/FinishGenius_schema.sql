@@ -1511,3 +1511,56 @@ END;
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910201339_ProcessIntegrity'
+)
+BEGIN
+    CREATE INDEX [IX_ScheduleStepOverrides_ProcessStepValueId] ON [fg].[ScheduleStepOverrides] ([ProcessStepValueId]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910201339_ProcessIntegrity'
+)
+BEGIN
+    CREATE INDEX [IX_ProcessStepEntries_PullDownId] ON [fg].[ProcessStepEntries] ([PullDownId]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910201339_ProcessIntegrity'
+)
+BEGIN
+    EXEC(N'CREATE UNIQUE INDEX [IX_ProcessSchedules_GroupId_Number] ON [fg].[ProcessSchedules] ([GroupId], [Number]) WHERE [IsArchived] = 0');
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910201339_ProcessIntegrity'
+)
+BEGIN
+    ALTER TABLE [fg].[ProcessStepEntries] ADD CONSTRAINT [FK_ProcessStepEntries_SubStepPullDowns_PullDownId] FOREIGN KEY ([PullDownId]) REFERENCES [fg].[SubStepPullDowns] ([Id]) ON DELETE SET NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910201339_ProcessIntegrity'
+)
+BEGIN
+    ALTER TABLE [fg].[ScheduleStepOverrides] ADD CONSTRAINT [FK_ScheduleStepOverrides_ProcessStepValues_ProcessStepValueId] FOREIGN KEY ([ProcessStepValueId]) REFERENCES [fg].[ProcessStepValues] ([Id]) ON DELETE CASCADE;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910201339_ProcessIntegrity'
+)
+BEGIN
+    INSERT INTO [fg].[__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20260910201339_ProcessIntegrity', N'10.0.12');
+END;
+
+COMMIT;
+GO
+

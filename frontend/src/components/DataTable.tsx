@@ -191,11 +191,19 @@ export function DataTable<T>(props: DataTableProps<T>) {
                         <input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={isSel} onChange={() => toggle(key)} aria-label="Select row" />
                       </td>
                     )}
-                    {columns.map((c) => (
-                      <td key={c.key} className={clsx('td', dense && 'py-1.5', c.hideBelow && hide[c.hideBelow], c.align === 'right' && 'text-right', c.align === 'center' && 'text-center', c.className)}>
-                        {c.cell ? c.cell(r) : String(defaultValue(r, c) ?? '')}
-                      </td>
-                    ))}
+                    {columns.map((c) => {
+                      const text = c.cell ? null : String(defaultValue(r, c) ?? '')
+                      return (
+                        <td
+                          key={c.key}
+                          className={clsx('td', dense && 'py-1.5', c.hideBelow && hide[c.hideBelow], c.align === 'right' && 'text-right', c.align === 'center' && 'text-center',
+                            // short plain values (ids, group names, codes) stay on one line
+                            text !== null && text.length <= 24 && 'whitespace-nowrap', c.className)}
+                        >
+                          {c.cell ? c.cell(r) : text}
+                        </td>
+                      )
+                    })}
                   </tr>
                 )
               })
