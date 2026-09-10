@@ -56,14 +56,14 @@ public class GroupCopyService(AppDbContext db, FileStorage files, CurrentUser me
             Zip = src.Zip, Country = src.Country, TimeZone = src.TimeZone, ChecklistDeletionEnabled = src.ChecklistDeletionEnabled,
             LogoFile = src.LogoFile == null ? null : await files.CopyAsync(src.LogoFile, "logos"),
         };
-        db.Groups.Add(dest);
-        await db.SaveChangesAsync();
-
         var copied = new Dictionary<string, int>();
         var strategy = db.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
+            // The new group is created inside the transaction so a failed copy leaves nothing behind.
             await using var tx = await db.Database.BeginTransactionAsync();
+            db.Groups.Add(dest);
+            await db.SaveChangesAsync();
             if (o.Vendors)
                 copied["Vendors"] = await CopyVendorsAsync(await db.Vendors.Where(v => v.GroupId == sourceId && !v.IsDeleted).Select(v => v.Id).ToListAsync(), dest.Id);
             if (o.Materials)
