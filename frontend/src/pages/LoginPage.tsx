@@ -41,7 +41,9 @@ export default function LoginPage() {
       <div className="hidden lg:flex flex-col justify-between bg-sidebar text-sidebar-foreground p-10 relative overflow-hidden">
         <div className="absolute -top-24 -right-24 h-96 w-96 rounded-full bg-primary/30 blur-3xl" />
         <div className="absolute bottom-0 left-0 h-72 w-72 rounded-full bg-primary/10 blur-3xl" />
-        <Logo />
+        <div className="relative">
+          <Logo size="lg" />
+        </div>
         <div className="relative">
           <h2 className="text-3xl font-semibold leading-tight text-white">
             Industrial coatings formulation,

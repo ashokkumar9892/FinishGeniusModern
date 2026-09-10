@@ -4,6 +4,7 @@ import { api, errorMessage } from '@/lib/api'
 import { dateTime, num } from '@/lib/format'
 import { ErrorBanner, LoadingBlock, Modal } from '@/components/ui'
 import { PrintPortal } from './shared'
+import { logoSrc } from '@/components/Layout'
 import type { SchedulePrint } from './types'
 
 const range = (min?: number | null, max?: number | null) =>
@@ -15,7 +16,10 @@ export function SchedulePrintDocument({ data }: { data: SchedulePrint }) {
     <div className="bg-white text-slate-900 text-[12px] leading-snug">
       <header className="flex items-start justify-between gap-4 border-b-2 border-orange-500 pb-2 mb-3">
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-orange-600">Finish Genius · Process Schedule</div>
+          <div className="flex items-center gap-2">
+            <img src={logoSrc} alt="Finish Genius PRO" className="h-8" />
+            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-orange-600">Finish Genius · Process Schedule</div>
+          </div>
           <h1 className="text-xl font-bold">{data.name}</h1>
           <div className="text-slate-600">
             Schedule # <b className="text-slate-900">{data.number}</b>

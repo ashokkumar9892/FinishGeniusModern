@@ -212,7 +212,7 @@ public class FormulasController(AppDbContext db, CurrentUser me, AuditService au
         string? categoryName = null;
         if (input.CategoryId is > 0)
         {
-            categoryName = await db.MaterialCategories.Where(c => c.Id == input.CategoryId && c.GroupId == f.GroupId && c.MaterialType == MaterialType.Formula)
+            categoryName = await db.MaterialCategories.Where(c => c.Id == input.CategoryId && (c.GroupId == f.GroupId || c.GroupId == null) && c.MaterialType == MaterialType.Formula)
                 .Select(c => c.Name).FirstOrDefaultAsync();
             if (categoryName == null) errors.Add("The selected Category does not belong to this group.");
         }

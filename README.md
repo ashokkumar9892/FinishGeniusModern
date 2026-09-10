@@ -26,6 +26,17 @@ Sign in with **admin / Admin@12345** (created on first start — change it under
 
 Full guide: [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md)
 
+## Real data from the legacy app
+
+```powershell
+cd backend\FinishGenius.Api
+dotnet run -- import-legacy --source FGAPP --yes
+```
+
+Copies groups, users (existing passwords keep working), materials, formulas, process steps/schedules, My Work history,
+devices, work instructions, documents/photos metadata and messages from the legacy `FGAPP` database into the `fg`
+schema of the configured database. Details: [docs/LEGACY_IMPORT.md](docs/LEGACY_IMPORT.md)
+
 ## Build for production
 
 ```powershell

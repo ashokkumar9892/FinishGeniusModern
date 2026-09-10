@@ -58,17 +58,17 @@ export const navSections: { title: string; items: NavItem[] }[] = [
 const NAV_KEY = 'finish-genius.nav'
 const THEME_KEY = 'fg.theme'
 
-export function Logo({ compact }: { compact?: boolean }) {
+/** The official Finish Genius PRO badge (public/brand/fg-logo.png, 149×120). */
+export const logoSrc = import.meta.env.BASE_URL + 'brand/fg-logo.png'
+
+export function Logo({ compact, size = 'md' }: { compact?: boolean; size?: 'md' | 'lg' }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <div className="h-9 w-9 rounded-lg bg-primary text-primary-foreground grid place-items-center font-black italic text-sm shadow-md shrink-0">Fg</div>
-      {!compact && (
-        <div className="leading-tight">
-          <div className="font-extrabold italic tracking-wide text-[15px]">FINISH GENIUS</div>
-          <div className="text-[10px] uppercase tracking-[0.2em] text-sidebar-muted">Pro · v3.0</div>
-        </div>
-      )}
-    </div>
+    <img
+      src={logoSrc}
+      alt="Finish Genius PRO"
+      className={clsx('shrink-0 select-none drop-shadow', compact ? 'h-9' : size === 'lg' ? 'h-24' : 'h-12')}
+      draggable={false}
+    />
   )
 }
 

@@ -69,6 +69,20 @@ builder.Services.AddControllers().AddJsonOptions(o =>
 
 var app = builder.Build();
 
+// One-off data import from the legacy Finish Genius database:
+//   dotnet FinishGenius.Api.dll import-legacy --source FGAPP --yes
+if (args.Length > 0 && args[0].Equals("import-legacy", StringComparison.OrdinalIgnoreCase))
+{
+    var sourceIndex = Array.FindIndex(args, a => a.Equals("--source", StringComparison.OrdinalIgnoreCase));
+    var source = sourceIndex >= 0 && sourceIndex + 1 < args.Length ? args[sourceIndex + 1] : "FGAPP";
+    var confirmed = args.Any(a => a.Equals("--yes", StringComparison.OrdinalIgnoreCase));
+    using var importScope = app.Services.CreateScope();
+    var importDb = importScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    importDb.Database.Migrate();
+    await new LegacyImporter(importDb, app.Configuration, app.Logger).RunAsync(source, confirmed);
+    return;
+}
+
 app.UseMiddleware<ApiExceptionMiddleware>();
 
 if (app.Configuration.GetValue("Database:AutoMigrate", true))

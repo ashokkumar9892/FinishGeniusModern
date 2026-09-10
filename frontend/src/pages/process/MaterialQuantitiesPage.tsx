@@ -7,6 +7,7 @@ import { dateTime, money, num, toNumber } from '@/lib/format'
 import { useToast } from '@/components/toast'
 import { Card, EmptyState, ErrorBanner, Field, LoadingBlock, Note, PageHeader, Spinner } from '@/components/ui'
 import { EntityDocuments } from '@/components/EntityDocuments'
+import { logoSrc } from '@/components/Layout'
 import { BigStat, ScheduleFilter, scheduleLabel, useDebounced, useScheduleParam } from './shared'
 import type { Estimates, QuantityResult } from './types'
 
@@ -95,7 +96,10 @@ export default function MaterialQuantitiesPage() {
         <>
           {/* Print header */}
           <div className="print-only mb-4 border-b-2 border-orange-500 pb-2">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-orange-600 font-semibold">Finish Genius · Material Quantities</div>
+            <div className="flex items-center gap-2">
+              <img src={logoSrc} alt="Finish Genius PRO" className="h-8" />
+              <div className="text-[10px] uppercase tracking-[0.2em] text-orange-600 font-semibold">Finish Genius · Material Quantities</div>
+            </div>
             <div className="text-lg font-bold">{scheduleLabel(est.data)}</div>
             <div className="text-xs">
               {est.data.customerName && <>Customer: {est.data.customerName} · </>}One sided {num(oneN)} sq ft · Two sided {num(twoN)} sq ft · Printed{' '}

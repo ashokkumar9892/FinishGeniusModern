@@ -777,7 +777,7 @@ namespace FinishGenius.Api.Data.Migrations
                         .HasMaxLength(400)
                         .HasColumnType("nvarchar(400)");
 
-                    b.Property<int>("GroupId")
+                    b.Property<int?>("GroupId")
                         .HasColumnType("int");
 
                     b.Property<int>("MaterialType")
@@ -1044,9 +1044,7 @@ namespace FinishGenius.Api.Data.Migrations
 
                     b.HasIndex("GroupId", "IsArchived");
 
-                    b.HasIndex("GroupId", "Number")
-                        .IsUnique()
-                        .HasFilter("[IsArchived] = 0");
+                    b.HasIndex("GroupId", "Number");
 
                     b.ToTable("ProcessSchedules", "fg");
                 });
@@ -2207,8 +2205,7 @@ namespace FinishGenius.Api.Data.Migrations
                     b.HasOne("FinishGenius.Api.Domain.Group", "Group")
                         .WithMany()
                         .HasForeignKey("GroupId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Group");
                 });

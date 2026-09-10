@@ -79,12 +79,20 @@ Browse to `http://<VM external IP>/` and sign in (`admin` / the `Seed:AdminPassw
 | Setting | Meaning |
 |---|---|
 | `Database:AutoMigrate` | `true` = the app creates/updates the `fg` schema on startup. Set `false` if a DBA runs `FinishGenius_schema.sql` (idempotent) instead. |
-| `Database:SeedDemoData` | Creates the "AWFI Demo Group" with sample data. Set `false` for a clean production database. |
+| `Database:SeedDemoData` | Default `false`. `true` creates an "AWFI Demo Group" with sample data (for a brand-new, empty database). |
 | `Storage:Root` | Upload folder. Empty = `<site>\App_Data\uploads`. Can be a larger disk, e.g. `D:\FinishGeniusData`. Back it up. |
 | `Jwt:ExpiryHours` / `RememberMeDays` | Session lifetime. |
 
 A different database: change `Database=` in the connection string — the schema is created automatically (the SQL login
 needs `db_owner`, or `db_ddladmin` + read/write for migrations).
+
+### Pointing at a different database / importing legacy data
+
+- To use another database, change `ConnectionStrings:Default` in `appsettings.Local.json` and recycle the app pool —
+  the `fg` schema is created automatically on startup.
+- To (re)load the real data from the legacy `FGAPP` database on the same SQL Server, run from the site folder:
+  `dotnet FinishGenius.Api.dll import-legacy --source FGAPP --yes` (stop the site first; this replaces all `fg` data).
+  See [LEGACY_IMPORT.md](LEGACY_IMPORT.md), including where to copy legacy document/photo files.
 
 ## 5. HTTPS (recommended)
 

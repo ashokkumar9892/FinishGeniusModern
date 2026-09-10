@@ -95,7 +95,8 @@ public class GroupCopyService(AppDbContext db, FileStorage files, CurrentUser me
     {
         if (_categoryMap.TryGetValue((destGroup, srcCategoryId), out var id)) return id;
         var src = await db.MaterialCategories.Include(c => c.Characteristics).FirstAsync(c => c.Id == srcCategoryId);
-        if (src.GroupId == destGroup) return _categoryMap[(destGroup, srcCategoryId)] = src.Id;
+        // Shared library categories (GroupId null) are used by every group as-is.
+        if (src.GroupId == null || src.GroupId == destGroup) return _categoryMap[(destGroup, srcCategoryId)] = src.Id;
 
         var dest = await db.MaterialCategories.Include(c => c.Characteristics)
             .FirstOrDefaultAsync(c => c.GroupId == destGroup && c.Name == src.Name && c.MaterialType == src.MaterialType);

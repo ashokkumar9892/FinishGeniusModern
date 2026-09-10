@@ -133,7 +133,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // Schedule-level edits die with the step value they override; entries lose a deleted pull down.
         b.Entity<ScheduleStepOverride>().HasOne<ProcessStepValue>().WithMany().HasForeignKey(x => x.ProcessStepValueId).OnDelete(DeleteBehavior.Cascade);
         b.Entity<ProcessStepEntry>().HasOne<SubStepPullDown>().WithMany().HasForeignKey(x => x.PullDownId).OnDelete(DeleteBehavior.SetNull);
-        b.Entity<ProcessSchedule>().HasIndex(x => new { x.GroupId, x.Number }).IsUnique().HasFilter("[IsArchived] = 0");
+        // Not unique: imported legacy schedules reuse numbers; the API enforces uniqueness for new/changed numbers.
+        b.Entity<ProcessSchedule>().HasIndex(x => new { x.GroupId, x.Number });
 
         b.Entity<WorkExecution>().HasMany(x => x.Lines).WithOne().HasForeignKey(x => x.ExecutionId).OnDelete(DeleteBehavior.Cascade);
         b.Entity<WorkExecution>().HasIndex(x => new { x.GroupId, x.Status });

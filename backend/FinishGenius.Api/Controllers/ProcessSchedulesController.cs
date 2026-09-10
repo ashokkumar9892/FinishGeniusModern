@@ -160,7 +160,8 @@ public class ProcessSchedulesController(AppDbContext db, CurrentUser me, AuditSe
     {
         var s = await LoadAsync(id);
         var (name, number, customer) = Clean(input);
-        await EnsureUniqueNumberAsync(s.GroupId, number, s.Id);
+        // Legacy data contains duplicate numbers; only a changed number has to be unique.
+        if (!string.Equals(number, s.Number, StringComparison.Ordinal)) await EnsureUniqueNumberAsync(s.GroupId, number, s.Id);
         var existing = await db.ProcessScheduleSteps.Include(x => x.ProcessStep).Where(x => x.ScheduleId == id).ToListAsync();
         var byId = existing.ToDictionary(x => x.Id);
         var steps = input.Steps ?? [];

@@ -1,5 +1,6 @@
 import { ArrowLeft, Pencil, Printer } from 'lucide-react'
 import { money, num } from '@/lib/format'
+import { logoSrc } from '@/components/Layout'
 import type { FormulaTotals } from './formulaMath'
 
 export interface PrintLine {
@@ -65,7 +66,10 @@ export function FormulaPrintView({ data, onBack, onEdit, onPrint }: { data: Prin
       <article className="mx-auto max-w-3xl rounded-lg border bg-white p-6 text-slate-900 shadow-card print:max-w-none print:border-0 print:p-0 print:shadow-none">
         <header className="flex items-start justify-between gap-4 border-b-2 border-slate-900 pb-3">
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-orange-600">Finish Genius · Formula Card</div>
+            <div className="flex items-center gap-2">
+              <img src={logoSrc} alt="Finish Genius PRO" className="h-9" />
+              <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-orange-600">Finish Genius · Formula Card</div>
+            </div>
             <h1 className="mt-1 text-2xl font-bold leading-tight">{data.name || 'Untitled formula'}</h1>
             <div className="text-sm text-slate-600">{data.groupName}</div>
           </div>

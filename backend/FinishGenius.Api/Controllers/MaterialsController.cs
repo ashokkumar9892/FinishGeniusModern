@@ -211,7 +211,7 @@ public class MaterialsController(AppDbContext db, CurrentUser me, AuditService a
         {
             var cat = await db.MaterialCategories.AsNoTracking().FirstOrDefaultAsync(c => c.Id == input.CategoryId)
                       ?? throw ApiException.Bad("The selected Material Category does not exist.");
-            if (cat.GroupId != input.GroupId)
+            if (cat.GroupId != null && cat.GroupId != input.GroupId)
                 throw ApiException.Bad("The selected Material Category belongs to another group.");
             if (cat.MaterialType != input.MaterialType)
                 throw ApiException.Bad($"The selected Material Category is a {MaterialTypes.Label(cat.MaterialType)} category; choose a {MaterialTypes.Label(input.MaterialType)} category.");

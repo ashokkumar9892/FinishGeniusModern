@@ -153,7 +153,7 @@ public class ProcessStepsController(AppDbContext db, CurrentUser me, AuditServic
         var subs = await db.SubSteps.AsNoTracking().Include(s => s.PullDowns)
             .Where(s => s.IndustrySectorId == sectorId).OrderBy(s => s.Sequence).ToListAsync();
         var categories = await db.MaterialCategories.AsNoTracking().Include(c => c.Characteristics)
-            .Where(c => c.GroupId == groupId).OrderBy(c => c.Name).ToListAsync();
+            .Where(c => c.GroupId == groupId || c.GroupId == null).OrderBy(c => c.Name).ToListAsync();
         var entries = step == null
             ? []
             : await db.ProcessStepEntries.AsNoTracking().Where(e => e.ProcessStepId == step.Id)
@@ -294,7 +294,7 @@ public class ProcessStepsController(AppDbContext db, CurrentUser me, AuditServic
                 cleaned.Add((sel, null, []));
                 continue;
             }
-            if (!categories.TryGetValue(sel.CategoryId.Value, out var cat) || cat.GroupId != groupId)
+            if (!categories.TryGetValue(sel.CategoryId.Value, out var cat) || (cat.GroupId != null && cat.GroupId != groupId))
                 throw ApiException.Bad($"The selected category for \"{pullDowns[sel.PullDownId].Header}\" does not belong to this group.");
             var chars = cat.Characteristics.ToDictionary(c => c.Id);
             var values = new List<ValueInput>();

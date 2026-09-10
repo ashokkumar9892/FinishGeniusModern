@@ -200,7 +200,7 @@ public class MaterialImportService(AppDbContext db, FileStorage files, AuditServ
 
                 await using var tx = await db.Database.BeginTransactionAsync();
 
-                var categories = await db.MaterialCategories.Where(c => c.GroupId == groupId).ToListAsync();
+                var categories = await db.MaterialCategories.Where(c => c.GroupId == groupId || c.GroupId == null).ToListAsync();
                 var existing = await db.Materials.AsNoTracking().Where(m => m.GroupId == groupId && !m.IsDeleted)
                     .Select(m => new { m.MaterialType, m.ProductName, m.ProductCode }).ToListAsync();
                 var existingKeys = existing.Select(m => Key(m.MaterialType, m.ProductName, m.ProductCode)).ToHashSet();

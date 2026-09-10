@@ -37,7 +37,16 @@ public class LookupsController(AppDbContext db, CurrentUser me) : ControllerBase
                 new { Value = CalcVariables.MixPercent, Label = "Mix % of previous material" },
                 new { Value = CalcVariables.ProductionRate, Label = "Production rate (sq ft / hr)" },
                 new { Value = CalcVariables.CostPerSqFt, Label = "Cost ($ / sq ft)" },
-            },
+                new { Value = CalcVariables.MaterialCoverage, Label = "Legacy: base coverage (sq ft / gal)" },
+                new { Value = CalcVariables.MaterialQty, Label = "Legacy: base quantity (gal)" },
+                new { Value = CalcVariables.GunTransferEfficiency, Label = "Legacy: gun transfer efficiency (%)" },
+                new { Value = CalcVariables.StepLabor, Label = "Legacy: labor (min / sq ft)" },
+                new { Value = CalcVariables.StepSetup, Label = "Legacy: setup (min / sq ft)" },
+            }.Concat(Enumerable.Range(1, 7).SelectMany(n => new[]
+            {
+                new { Value = $"Misc{n}_ID", Label = $"Legacy: additive / consumable #{n}" },
+                new { Value = $"Misc{n}_Qty", Label = $"Legacy: additive / consumable #{n} qty (fl oz/gal or sq ft/pc)" },
+            })),
             TimeZones = TimeZoneInfo.GetSystemTimeZones().Select(z => new { Value = z.Id, Label = z.DisplayName }),
             Groups = await db.Groups.AsNoTracking().Where(g => groupIds.Contains(g.Id)).OrderBy(g => g.Name)
                 .Select(g => new { g.Id, g.Name }).ToListAsync(),

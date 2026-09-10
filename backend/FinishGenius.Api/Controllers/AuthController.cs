@@ -19,13 +19,18 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
     public async Task<IActionResult> Login(LoginRequest req)
     {
         var name = (req.Username ?? "").Trim();
-        var user = await db.Users.Include(u => u.Roles)
-            .FirstOrDefaultAsync(u => !u.IsDeleted && (u.Username == name || u.Email == name));
-        if (user == null || !Passwords.Verify(user.PasswordHash, req.Password ?? ""))
+        // Imported legacy data can contain the same username/email on an enabled and a disabled account.
+        var candidates = await db.Users.Include(u => u.Roles)
+            .Where(u => !u.IsDeleted && (u.Username == name || u.Email == name))
+            .OrderBy(u => u.Disabled).ThenByDescending(u => u.Id).ToListAsync();
+        var user = candidates.FirstOrDefault(u => Passwords.Verify(u.PasswordHash, req.Password ?? ""));
+        if (user == null)
             return Unauthorized(new { message = "Invalid username or password." });
         if (user.Disabled)
             return Unauthorized(new { message = "This account is disabled. Contact your administrator." });
 
+        if (Passwords.IsLegacyBcrypt(user.PasswordHash))
+            user.PasswordHash = Passwords.Hash(req.Password!); // upgrade legacy hash
         user.LastLoginAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         var (token, expires) = tokens.Create(user, req.RememberMe);

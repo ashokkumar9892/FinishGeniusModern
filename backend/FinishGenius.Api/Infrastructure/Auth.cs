@@ -50,9 +50,17 @@ public static class Passwords
 
     public static string Hash(string password) => Hasher.HashPassword(null!, password);
 
+    /// <summary>Accounts imported from the legacy app keep their bcrypt hashes until the next successful login.</summary>
+    public static bool IsLegacyBcrypt(string? hash) => hash != null && hash.StartsWith("$2");
+
     public static bool Verify(string hash, string password)
     {
         if (string.IsNullOrEmpty(hash)) return false;
+        if (IsLegacyBcrypt(hash))
+        {
+            try { return BCrypt.Net.BCrypt.Verify(password, hash); }
+            catch (Exception) { return false; }
+        }
         try
         {
             return Hasher.VerifyHashedPassword(null!, hash, password) != PasswordVerificationResult.Failed;

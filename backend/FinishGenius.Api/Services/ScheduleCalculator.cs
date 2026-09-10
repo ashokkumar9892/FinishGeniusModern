@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using FinishGenius.Api.Data;
 using FinishGenius.Api.Domain;
 using FinishGenius.Api.Infrastructure;
@@ -121,59 +122,119 @@ public class ScheduleCalculator(AppDbContext db)
         return decimal.TryParse(cleaned, NumberStyles.Number, CultureInfo.InvariantCulture, out var d) ? d : null;
     }
 
+    private static readonly Regex MiscVar = new(@"^Misc(\d+)_(ID|Qty)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static bool IsLegacyCalc(string? c) =>
+        c is CalcVariables.MaterialCoverage or CalcVariables.MaterialQty || (c != null && MiscVar.IsMatch(c));
+
+    /// <summary>"55%", "55" or "0.55" → 0.55; null when missing or not positive.</summary>
+    private static decimal? Fraction(string? s)
+    {
+        var n = Num(s);
+        if (n is not > 0) return null;
+        return n > 1 ? n / 100m : n;
+    }
+
+    private static decimal Positive(string? s) => Num(s) is decimal d && d > 0 ? d : 0;
+
     public async Task<QuantityResult> QuantitiesAsync(int scheduleId, decimal oneSided, decimal twoSided)
     {
         var sqft = Math.Max(0, oneSided) + 2 * Math.Max(0, twoSided);
         var values = await LoadValuesAsync(scheduleId);
 
-        var gallonsPerSqFt = new Dictionary<int, decimal>();
+        // quantity per single sq ft, keyed by material + unit ("Gallons" / "Pieces")
+        var perSqFt = new Dictionary<(int materialId, string unit), decimal>();
+        void Add(int? materialId, string unit, decimal q)
+        {
+            if (materialId == null || q <= 0) return;
+            var key = (materialId.Value, unit);
+            perSqFt[key] = perSqFt.GetValueOrDefault(key) + q;
+        }
         decimal hoursPerSqFt = 0, otherPerSqFt = 0;
 
-        foreach (var entry in values.GroupBy(v => (v.ScheduleStepId, v.SubStepSequence, v.Pass)))
+        foreach (var step in values.GroupBy(v => v.ScheduleStepId))
         {
-            var ordered = entry.OrderBy(v => v.CharacteristicSequence).ToList();
-            var coverage = ordered.Where(v => v.CalcVariable == CalcVariables.Coverage).Select(v => Num(v.Value)).FirstOrDefault(n => n > 0);
-            var rate = ordered.Where(v => v.CalcVariable == CalcVariables.ProductionRate).Select(v => Num(v.Value)).FirstOrDefault(n => n > 0);
-            if (rate is > 0) hoursPerSqFt += 1m / rate.Value;
-            otherPerSqFt += ordered.Where(v => v.CalcVariable == CalcVariables.CostPerSqFt).Sum(v => Num(v.Value) ?? 0);
+            // Legacy Gun_TE: only this share of the sprayed material reaches the part.
+            var te = step.Where(v => v.CalcVariable == CalcVariables.GunTransferEfficiency)
+                .Select(v => Fraction(v.Value)).FirstOrDefault(f => f is > 0 and <= 1) ?? 1m;
+            // Legacy labour / setup minutes per sq ft.
+            hoursPerSqFt += step.Where(v => v.CalcVariable is CalcVariables.StepLabor or CalcVariables.StepSetup).Sum(v => Positive(v.Value)) / 60m;
 
-            if (coverage is not > 0) continue;
-            int? current = null;
-            var mix = new List<(int materialId, decimal percent)>();
-            foreach (var v in ordered)
+            foreach (var entry in step.GroupBy(v => (v.SubStepSequence, v.Pass)))
             {
-                if (v.CalcVariable == CalcVariables.MaterialId && v.MaterialId != null)
-                {
-                    current = v.MaterialId;
-                    mix.Add((v.MaterialId.Value, 100m));
-                }
-                else if (v.CalcVariable == CalcVariables.MixPercent && current != null && Num(v.Value) is { } pct)
-                {
-                    mix[^1] = (mix[^1].materialId, pct);
-                }
-            }
-            foreach (var (materialId, percent) in mix)
-            {
-                var g = 1m / coverage.Value * percent / 100m;
-                gallonsPerSqFt[materialId] = gallonsPerSqFt.GetValueOrDefault(materialId) + g;
+                var ordered = entry.OrderBy(v => v.CharacteristicSequence).ToList();
+                var rate = ordered.Where(v => v.CalcVariable == CalcVariables.ProductionRate).Select(v => Num(v.Value)).FirstOrDefault(n => n > 0);
+                if (rate is > 0) hoursPerSqFt += 1m / rate.Value;
+                otherPerSqFt += ordered.Where(v => v.CalcVariable == CalcVariables.CostPerSqFt).Sum(v => Num(v.Value) ?? 0);
+
+                if (ordered.Any(v => IsLegacyCalc(v.CalcVariable))) AddLegacyEntry(ordered, te, Add);
+                else AddModernEntry(ordered, Add);
             }
         }
 
-        var ids = gallonsPerSqFt.Keys.ToList();
+        var ids = perSqFt.Keys.Select(k => k.materialId).Distinct().ToList();
         var materials = await db.Materials.AsNoTracking().Where(m => ids.Contains(m.Id)).ToDictionaryAsync(m => m.Id);
-        var lines = gallonsPerSqFt
-            .Where(kv => materials.ContainsKey(kv.Key))
+        var lines = perSqFt
+            .Where(kv => materials.ContainsKey(kv.Key.materialId))
             .Select(kv =>
             {
-                var m = materials[kv.Key];
+                var m = materials[kv.Key.materialId];
                 var qty = Math.Round(kv.Value * sqft, 3);
                 var name = string.IsNullOrWhiteSpace(m.ProductCode) ? m.ProductName : $"{m.ProductName} ({m.ProductCode})";
-                return new MaterialQuantityLine(m.Id, name, m.ProductCode, qty, "Gallons", m.Price, Math.Round(qty * m.Price, 2));
+                return new MaterialQuantityLine(m.Id, name, m.ProductCode, qty, kv.Key.unit, m.Price, Math.Round(qty * m.Price, 2));
             })
-            .OrderBy(l => l.Name).ToList();
-        var materialCostPerSqFt = gallonsPerSqFt.Where(kv => materials.ContainsKey(kv.Key)).Sum(kv => kv.Value * materials[kv.Key].Price);
+            .OrderBy(l => l.Unit).ThenBy(l => l.Name).ToList();
+        var materialCostPerSqFt = perSqFt.Where(kv => materials.ContainsKey(kv.Key.materialId)).Sum(kv => kv.Value * materials[kv.Key.materialId].Price);
 
         return new QuantityResult(sqft, Math.Round(sqft * hoursPerSqFt, 2), lines, materialCostPerSqFt, hoursPerSqFt, otherPerSqFt);
+    }
+
+    /// <summary>Coverage applies to the entry's materials; MixPercent belongs to the material chosen just before it.</summary>
+    private static void AddModernEntry(List<ScheduleValue> ordered, Action<int?, string, decimal> add)
+    {
+        var coverage = ordered.Where(v => v.CalcVariable == CalcVariables.Coverage).Select(v => Num(v.Value)).FirstOrDefault(n => n > 0);
+        if (coverage is not > 0) return;
+        var mix = new List<(int materialId, decimal percent)>();
+        foreach (var v in ordered)
+        {
+            if (v.CalcVariable == CalcVariables.MaterialId && v.MaterialId != null)
+                mix.Add((v.MaterialId.Value, 100m));
+            else if (v.CalcVariable == CalcVariables.MixPercent && mix.Count > 0 && Num(v.Value) is { } pct)
+                mix[^1] = (mix[^1].materialId, pct);
+        }
+        foreach (var (materialId, percent) in mix)
+            add(materialId, "Gallons", 1m / coverage.Value * percent / 100m);
+    }
+
+    /// <summary>
+    /// Legacy rules: base gallons = 1 ÷ (Material_Coverage × gun TE); MiscN additive in fl oz/gal → base × oz ÷ 128;
+    /// in "sq ft per piece" → pieces = 1 ÷ value; in "sq ft / qt" → gallons = 1 ÷ value ÷ 4; in % → base × %.
+    /// </summary>
+    private static void AddLegacyEntry(List<ScheduleValue> ordered, decimal te, Action<int?, string, decimal> add)
+    {
+        var coverageValue = ordered.FirstOrDefault(v => v.CalcVariable == CalcVariables.MaterialCoverage);
+        var coverage = Num(coverageValue?.Value);
+        var coverageIsArea = coverageValue?.Unit is not { Length: > 0 } u || u.Contains("sq", StringComparison.OrdinalIgnoreCase);
+        decimal? baseGal = coverage is > 0 && coverageIsArea ? 1m / coverage.Value / te : null;
+        if (baseGal != null)
+            add(ordered.FirstOrDefault(v => v.CalcVariable == CalcVariables.MaterialId && v.MaterialId != null)?.MaterialId, "Gallons", baseGal.Value);
+
+        var pairs = ordered
+            .Select(v => (v, m: v.CalcVariable == null ? Match.Empty : MiscVar.Match(v.CalcVariable)))
+            .Where(x => x.m.Success)
+            .GroupBy(x => x.m.Groups[1].Value);
+        foreach (var pair in pairs)
+        {
+            var material = pair.FirstOrDefault(x => x.m.Groups[2].Value.Equals("ID", StringComparison.OrdinalIgnoreCase)).v?.MaterialId;
+            var qtyValue = pair.FirstOrDefault(x => x.m.Groups[2].Value.Equals("Qty", StringComparison.OrdinalIgnoreCase)).v;
+            if (material == null || qtyValue == null || Num(qtyValue.Value) is not > 0) continue;
+            var qty = Num(qtyValue.Value)!.Value;
+            var unit = (qtyValue.Unit ?? "").ToLowerInvariant();
+            if (unit.Contains("oz")) { if (baseGal != null) add(material, "Gallons", baseGal.Value * qty / 128m); }
+            else if (unit.Contains("qt")) add(material, "Gallons", 1m / qty / 4m);
+            else if (unit.Contains("sq")) add(material, "Pieces", 1m / qty);
+            else if (unit.Contains('%') && baseGal != null) add(material, "Gallons", baseGal.Value * qty / 100m);
+        }
     }
 
     public async Task<PricingResult> PriceAsync(int scheduleId, PricingInput p)

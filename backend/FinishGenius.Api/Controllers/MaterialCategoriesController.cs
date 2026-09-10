@@ -29,7 +29,7 @@ public class MaterialCategoriesController(AppDbContext db, CurrentUser me, Audit
     public async Task<IActionResult> List([FromQuery] int groupId, [FromQuery] MaterialType? type)
     {
         await me.EnsureGroupAsync(groupId);
-        var q = db.MaterialCategories.AsNoTracking().Where(c => c.GroupId == groupId);
+        var q = db.MaterialCategories.AsNoTracking().Where(c => c.GroupId == groupId || c.GroupId == null);
         if (type != null) q = q.Where(c => c.MaterialType == type);
         var rows = await q.Include(c => c.Characteristics).OrderBy(c => c.Name).ToListAsync();
         var ids = rows.Select(r => r.Id).ToList();
@@ -39,7 +39,7 @@ public class MaterialCategoriesController(AppDbContext db, CurrentUser me, Audit
             .ToDictionaryAsync(x => x.Key, x => x.Count);
         return Ok(rows.Select(c => new
         {
-            c.Id, c.GroupId, c.Name, MaterialType = (int)c.MaterialType, MaterialTypeLabel = MaterialTypes.Label(c.MaterialType),
+            c.Id, c.GroupId, IsShared = c.GroupId == null, c.Name, MaterialType = (int)c.MaterialType, MaterialTypeLabel = MaterialTypes.Label(c.MaterialType),
             c.Filter1, c.Filter2,
             MaterialCount = counts.GetValueOrDefault(c.Id),
             Characteristics = c.Characteristics.OrderBy(x => x.Sequence).Select(x => new
@@ -74,7 +74,7 @@ public class MaterialCategoriesController(AppDbContext db, CurrentUser me, Audit
             await db.Materials.AnyAsync(m => m.CategoryId == id && !m.IsDeleted))
             throw ApiException.Bad("The Material Type cannot be changed while materials use this category.");
         var old =(c.Name, Type: MaterialTypes.Label(c.MaterialType), c.Filter1, c.Filter2);
-        await ApplyAsync(c, input with { GroupId = c.GroupId });
+        await ApplyAsync(c, input);
         var changes = new List<string>();
         if (old.Name != c.Name) changes.Add($"Name: {old.Name} → {c.Name}");
         if (old.Type != MaterialTypes.Label(c.MaterialType)) changes.Add($"Material Type: {old.Type} → {MaterialTypes.Label(c.MaterialType)}");
@@ -177,7 +177,9 @@ public class MaterialCategoriesController(AppDbContext db, CurrentUser me, Audit
         var q = db.MaterialCategories.AsQueryable();
         if (withCharacteristics) q = q.Include(c => c.Characteristics);
         var c = await q.FirstOrDefaultAsync(x => x.Id == id) ?? throw ApiException.NotFound("Category");
-        await me.EnsureGroupAsync(c.GroupId);
+        // Shared (library) categories are used by every group, so only System Administrators may change them.
+        if (c.GroupId == null) me.EnsureSystemAdmin();
+        else await me.EnsureGroupAsync(c.GroupId.Value);
         return c;
     }
 
@@ -194,7 +196,7 @@ public class MaterialCategoriesController(AppDbContext db, CurrentUser me, Audit
         var name = Text.Req(input.Name, "Name");
         if (name.Length > 400) throw ApiException.Bad("Name is too long (400 characters max).");
         if (!Enum.IsDefined(input.MaterialType)) throw ApiException.Bad("Material Type is required.");
-        if (await db.MaterialCategories.AnyAsync(x => x.GroupId == input.GroupId && x.MaterialType == input.MaterialType && x.Name == name && x.Id != c.Id))
+        if (await db.MaterialCategories.AnyAsync(x => x.GroupId == c.GroupId && x.MaterialType == input.MaterialType && x.Name == name && x.Id != c.Id))
             throw ApiException.Bad($"A {MaterialTypes.Label(input.MaterialType)} category named \"{name}\" already exists.");
         c.Name = name;
         c.MaterialType = input.MaterialType;

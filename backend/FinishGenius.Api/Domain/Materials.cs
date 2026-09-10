@@ -12,8 +12,12 @@ public enum MaterialType
     Product = 7,
 }
 
-public class MaterialCategory : GroupOwned
+public class MaterialCategory
 {
+    public int Id { get; set; }
+    /// <summary>null = shared library category available to every group (all legacy categories are shared).</summary>
+    public int? GroupId { get; set; }
+    public Group? Group { get; set; }
     public string Name { get; set; } = "";
     public MaterialType MaterialType { get; set; }
     /// <summary>Legacy filter columns: pull-downs select categories by MaterialType + Filter2 (e.g. "GUNS").</summary>
@@ -41,7 +45,19 @@ public static class CalcVariables
     public const string MixPercent = "MixPercent";        // % of the mix this material represents
     public const string ProductionRate = "ProductionRate"; // sq ft per hour
     public const string CostPerSqFt = "CostPerSqFt";      // $ per sq ft (process costing sub step)
-    public static readonly string[] All = [None, MaterialId, Coverage, MixPercent, ProductionRate, CostPerSqFt];
+
+    // Legacy Finish Genius tags (imported data): Material_ID + Material_Coverage (+ Material_Qty) is the base coating,
+    // MiscN_ID + MiscN_Qty pairs are additives (fl oz / gal of base) or consumables (sq ft per piece),
+    // Gun_TE is the spray gun transfer efficiency (%), Step_Labor / Step_Setup are minutes per sq ft.
+    public const string MaterialCoverage = "Material_Coverage";
+    public const string MaterialQty = "Material_Qty";
+    public const string GunTransferEfficiency = "Gun_TE";
+    public const string StepLabor = "Step_Labor";
+    public const string StepSetup = "Step_Setup";
+    public static readonly string[] Legacy =
+        [MaterialCoverage, MaterialQty, GunTransferEfficiency, StepLabor, StepSetup, .. Enumerable.Range(1, 7).SelectMany(n => new[] { $"Misc{n}_ID", $"Misc{n}_Qty" })];
+
+    public static readonly string[] All = [None, MaterialId, Coverage, MixPercent, ProductionRate, CostPerSqFt, .. Legacy];
 }
 
 /// <summary>An input shown when a category is chosen inside a process sub step (legacy "Characteristics").</summary>
