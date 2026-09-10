@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Inbox, Loader2, Search, X } from 'lucide-react'
@@ -242,6 +242,10 @@ export function Checkbox({ checked, onChange, label, disabled }: {
 
 const sizes = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-3xl', xl: 'max-w-5xl', full: 'max-w-[96vw]' }
 
+// Open modals in opening order; Escape only closes the topmost one (nested modals are common).
+const modalStack: number[] = []
+let modalSeq = 0
+
 export function Modal({ open, onClose, title, children, footer, size = 'md', closeOnBackdrop = false }: {
   open: boolean
   onClose: () => void
@@ -251,12 +255,22 @@ export function Modal({ open, onClose, title, children, footer, size = 'md', clo
   size?: keyof typeof sizes
   closeOnBackdrop?: boolean
 }) {
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const id = ++modalSeq
+    modalStack.push(id)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && modalStack[modalStack.length - 1] === id) closeRef.current()
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      const i = modalStack.indexOf(id)
+      if (i >= 0) modalStack.splice(i, 1)
+    }
+  }, [open])
 
   if (!open) return null
   return createPortal(

@@ -130,6 +130,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         b.Entity<ProcessSchedule>().HasMany(x => x.Steps).WithOne().HasForeignKey(x => x.ScheduleId).OnDelete(DeleteBehavior.Cascade);
         b.Entity<ProcessSchedule>().HasIndex(x => new { x.GroupId, x.IsArchived });
         b.Entity<ProcessScheduleStep>().HasMany(x => x.Overrides).WithOne().HasForeignKey(x => x.ScheduleStepId).OnDelete(DeleteBehavior.Cascade);
+        // Schedule-level edits die with the step value they override; entries lose a deleted pull down.
+        b.Entity<ScheduleStepOverride>().HasOne<ProcessStepValue>().WithMany().HasForeignKey(x => x.ProcessStepValueId).OnDelete(DeleteBehavior.Cascade);
+        b.Entity<ProcessStepEntry>().HasOne<SubStepPullDown>().WithMany().HasForeignKey(x => x.PullDownId).OnDelete(DeleteBehavior.SetNull);
+        b.Entity<ProcessSchedule>().HasIndex(x => new { x.GroupId, x.Number }).IsUnique().HasFilter("[IsArchived] = 0");
 
         b.Entity<WorkExecution>().HasMany(x => x.Lines).WithOne().HasForeignKey(x => x.ExecutionId).OnDelete(DeleteBehavior.Cascade);
         b.Entity<WorkExecution>().HasIndex(x => new { x.GroupId, x.Status });

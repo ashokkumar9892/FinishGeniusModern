@@ -68,7 +68,6 @@ public class ScheduleCalculator(AppDbContext db)
             .Include(e => e.Values).ThenInclude(v => v.Characteristic)
             .Include(e => e.Values).ThenInclude(v => v.Material)
             .ToListAsync();
-        var overrideMaterialIds = steps.SelectMany(s => s.Overrides).Select(o => o.Value).ToList();
 
         var result = new List<ScheduleValue>();
         var number = 0;
@@ -109,7 +108,6 @@ public class ScheduleCalculator(AppDbContext db)
             result = result.Select(r => r.MaterialId != null && r.MaterialName == null && names.TryGetValue(r.MaterialId.Value, out var n)
                 ? r with { MaterialName = n } : r).ToList();
         }
-        _ = overrideMaterialIds;
         return result;
     }
 

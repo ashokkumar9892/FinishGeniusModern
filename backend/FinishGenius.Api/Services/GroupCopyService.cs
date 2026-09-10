@@ -215,14 +215,15 @@ public class GroupCopyService(AppDbContext db, FileStorage files, CurrentUser me
     private async Task<int> CopyStepAsync(ProcessStep s, int destGroup, string name)
     {
         var copy = new ProcessStep { GroupId = destGroup, Name = name, IndustrySectorId = s.IndustrySectorId };
-        foreach (var e in s.Entries)
+        // Same ordering as ValueIdMapAsync, which maps schedule overrides onto the copied values by position.
+        foreach (var e in s.Entries.OrderBy(e => e.SubStepId).ThenBy(e => e.Pass).ThenBy(e => e.Id))
         {
             var entry = new ProcessStepEntry
             {
                 SubStepId = e.SubStepId, Pass = e.Pass, PullDownId = e.PullDownId,
                 CategoryId = e.CategoryId == null ? null : await MapCategoryAsync(e.CategoryId.Value, destGroup),
             };
-            foreach (var v in e.Values)
+            foreach (var v in e.Values.OrderBy(v => v.Id))
             {
                 entry.Values.Add(new ProcessStepValue
                 {
@@ -348,7 +349,11 @@ public class GroupCopyService(AppDbContext db, FileStorage files, CurrentUser me
             foreach (var r in w.RelatedDocuments)
                 copy.RelatedDocuments.Add(new WorkInstructionRelatedDoc { DocumentNumber = r.DocumentNumber, DocumentName = r.DocumentName, Author = r.Author });
             foreach (var i in w.Items)
-                copy.Items.Add(new WorkInstructionItem { Kind = i.Kind, Description = i.Description });
+                copy.Items.Add(new WorkInstructionItem
+                {
+                    Kind = i.Kind, Description = i.Description,
+                    MaterialId = i.MaterialId == null ? null : await MapMaterialAsync(i.MaterialId.Value, destGroup),
+                });
             db.WorkInstructions.Add(copy);
         }
         await db.SaveChangesAsync();

@@ -45,11 +45,12 @@ export function errorMessage(err: unknown): string {
 }
 
 /** URL for a stored file (images/videos/downloads cannot send the auth header). */
-export function fileUrl(path?: string | null, download = false): string {
+export function fileUrl(path?: string | null, download = false, fileName?: string | null): string {
   if (!path) return ''
   const token = tokenStore.get() ?? ''
   const base = import.meta.env.BASE_URL.replace(/\/$/, '')
-  return `${base}/api/files/${path}?access_token=${encodeURIComponent(token)}${download ? '&download=1' : ''}`
+  const dl = download ? `&download=1${fileName ? `&name=${encodeURIComponent(fileName)}` : ''}` : ''
+  return `${base}/api/files/${path}?access_token=${encodeURIComponent(token)}${dl}`
 }
 
 /** Triggers a browser download of an authenticated API response (Excel exports, templates). */

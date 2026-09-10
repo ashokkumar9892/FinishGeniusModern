@@ -19,6 +19,14 @@ public class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExceptionMi
         try
         {
             await next(ctx);
+            // Role checks ([Authorize(Roles)]) and expired tokens produce empty 403/401 responses; give the UI a readable message.
+            if (!ctx.Response.HasStarted && ctx.Request.Path.StartsWithSegments("/api"))
+            {
+                if (ctx.Response.StatusCode == StatusCodes.Status403Forbidden)
+                    await Write(ctx, StatusCodes.Status403Forbidden, "You do not have permission to perform this action.");
+                else if (ctx.Response.StatusCode == StatusCodes.Status401Unauthorized)
+                    await Write(ctx, StatusCodes.Status401Unauthorized, "Your session has expired. Please sign in again.");
+            }
         }
         catch (ApiException ex)
         {
