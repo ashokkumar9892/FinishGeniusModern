@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Starts the Finish Genius API (http://localhost:5080) and the Vite dev server (http://localhost:5173) in two windows.
+  Starts the Finish Genius API (http://localhost:5080) and the Vite dev server (http://localhost:5180) in two windows.
 #>
 $root = $PSScriptRoot
 $api = Join-Path $root 'backend\FinishGenius.Api'
@@ -19,6 +19,6 @@ Start-Process powershell -ArgumentList '-NoExit', '-Command', "Set-Location '$ap
 Start-Process powershell -ArgumentList '-NoExit', '-Command', "Set-Location '$web'; npm run dev"
 
 Write-Host 'API:  http://localhost:5080   (health: /api/health)'
-Write-Host 'UI:   http://localhost:5173   (sign in: admin / Admin@12345)'
+Write-Host 'UI:   http://localhost:5180   (sign in: admin / Admin@12345)'
 Start-Sleep 6
-Start-Process 'http://localhost:5173'
+Start-Process 'http://localhost:5180'

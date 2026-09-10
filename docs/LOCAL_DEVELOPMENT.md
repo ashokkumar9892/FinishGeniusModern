@@ -51,12 +51,12 @@ Or manually in two terminals:
 cd backend\FinishGenius.Api
 dotnet run --launch-profile http
 
-# Terminal 2 – UI on http://localhost:5173 (proxies /api to 5080, hot reload)
+# Terminal 2 – UI on http://localhost:5180 (proxies /api to 5080, hot reload)
 cd frontend
 npm run dev
 ```
 
-Open http://localhost:5173 and sign in with **admin / Admin@12345**.
+Open http://localhost:5180 and sign in with **admin / Admin@12345**.
 
 On first start the API automatically:
 1. applies EF Core migrations (creates schema `fg` and its tables in the configured database),

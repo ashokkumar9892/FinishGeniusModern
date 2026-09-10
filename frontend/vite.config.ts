@@ -8,7 +8,9 @@ export default defineConfig({
   plugins: [react()],
   resolve: { alias: { '@': path.resolve(__dirname, 'src') } },
   server: {
-    port: 5173,
+    // Own port (5173 is commonly taken by other Vite projects); fail instead of silently switching ports.
+    port: 5180,
+    strictPort: true,
     proxy: { '/api': { target: 'http://localhost:5080', changeOrigin: true } },
   },
   build: {

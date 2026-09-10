@@ -4,7 +4,7 @@ React 19 + TypeScript + Vite + Tailwind CSS single-page app.
 
 ```powershell
 npm install        # once
-npm run dev        # http://localhost:5173 (proxies /api to the API on http://localhost:5080)
+npm run dev        # http://localhost:5180 (proxies /api to the API on http://localhost:5080)
 npx tsc -b         # type-check
 npm run build      # production build -> ../backend/FinishGenius.Api/wwwroot
 ```

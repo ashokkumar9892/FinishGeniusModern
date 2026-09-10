@@ -18,7 +18,7 @@ work instructions.
 copy backend\FinishGenius.Api\appsettings.Local.example.json backend\FinishGenius.Api\appsettings.Local.json
 #    ...edit it (the dev machine already has one)
 
-# 2. run API (http://localhost:5080) and UI (http://localhost:5173)
+# 2. run API (http://localhost:5080) and UI (http://localhost:5180)
 powershell -ExecutionPolicy Bypass -File .\run-local.ps1
 ```
 
