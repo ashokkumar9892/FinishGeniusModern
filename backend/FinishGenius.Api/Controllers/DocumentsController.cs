@@ -1,6 +1,7 @@
 using FinishGenius.Api.Data;
 using FinishGenius.Api.Domain;
 using FinishGenius.Api.Infrastructure;
+using FinishGenius.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,7 +16,7 @@ namespace FinishGenius.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/documents")]
-public class DocumentsController(AppDbContext db, CurrentUser me, AuditService audit, FileStorage files) : ControllerBase
+public class DocumentsController(AppDbContext db, CurrentUser me, AuditService audit, FileStorage files, GroupCopyService copier) : ControllerBase
 {
     public const long MaxFileSize = 100L * 1024 * 1024;
     private const string AuditType = "Document";
@@ -37,6 +38,8 @@ public class DocumentsController(AppDbContext db, CurrentUser me, AuditService a
 
     public record LinkRequest(string EntityType, int EntityId);
 
+    public record LinkManyRequest(int GroupId, string EntityType, int EntityId, List<int>? DocumentIds);
+
     public record LinkDto(string EntityType, int EntityId, string Label);
 
     public record DocumentDto(
@@ -46,15 +49,22 @@ public class DocumentsController(AppDbContext db, CurrentUser me, AuditService a
     // ------------------------------------------------------------------ queries
 
     /// <summary>
-    /// GET /api/documents?groupId=2&amp;entityType=Material&amp;entityId=15&amp;search=sds —
+    /// GET /api/documents?groupId=2&amp;entityType=Material&amp;entityId=15&amp;search=sds&amp;take=200 —
     /// documents of the group; with entityType + entityId only those linked to that object
-    /// (entityId 0 = group-level link, e.g. Pricing / Material Quantities).
+    /// (entityId 0 = group-level link, e.g. Pricing / Material Quantities). Without groupId: every accessible group
+    /// (System Admins: the whole library — use search + take, it is large).
     /// </summary>
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] int? groupId, [FromQuery] string? entityType, [FromQuery] int? entityId, [FromQuery] string? search)
+    public async Task<IActionResult> List([FromQuery] int? groupId, [FromQuery] string? entityType, [FromQuery] int? entityId, [FromQuery] string? search,
+        [FromQuery] int? take)
     {
-        var scope = await me.ScopeAsync(groupId);
-        var q = db.Documents.AsNoTracking().Where(d => scope.Contains(d.GroupId));
+        var q = db.Documents.AsNoTracking();
+        // Users who see every group need no group filter (it would be an IN list of every group).
+        if (groupId is > 0 || !me.SeesAllGroups)
+        {
+            var scope = await me.ScopeAsync(groupId);
+            q = q.Where(d => scope.Contains(d.GroupId));
+        }
         if (!string.IsNullOrWhiteSpace(entityType))
         {
             var type = NormalizeType(entityType);
@@ -66,7 +76,8 @@ public class DocumentsController(AppDbContext db, CurrentUser me, AuditService a
             var s = search.Trim();
             q = q.Where(d => d.Name.Contains(s) || (d.FileName != null && d.FileName.Contains(s)));
         }
-        return Ok(await ProjectAsync(q.OrderByDescending(d => d.Id)));
+        var ordered = q.OrderByDescending(d => d.Id);
+        return Ok(await ProjectAsync(take is > 0 ? ordered.Take(Math.Min(take.Value, 1000)) : ordered));
     }
 
     [HttpGet("{id:int}")]
@@ -288,6 +299,50 @@ public class DocumentsController(AppDbContext db, CurrentUser me, AuditService a
         audit.Log(AuditType, doc.Id, "Linked", $"Linked to {labels[(type, body.EntityId)]}", doc.GroupId);
         await db.SaveChangesAsync();
         return Ok(new { message = "Document linked." });
+    }
+
+    /// <summary>
+    /// POST /api/documents/link-many { groupId, entityType, entityId, documentIds } — "Choose from Doc Directory". System
+    /// Administrators may pick documents of any group: a document of another group is copied into <c>groupId</c> first and the
+    /// copy is linked (legacy behaviour).
+    /// </summary>
+    [HttpPost("link-many")]
+    public async Task<IActionResult> LinkMany([FromBody] LinkManyRequest req)
+    {
+        await me.EnsureGroupAsync(req.GroupId);
+        var type = NormalizeType(req.EntityType);
+        await EnsureTargetsAsync(req.GroupId, [(type, req.EntityId)]);
+        var ids = (req.DocumentIds ?? []).Distinct().ToList();
+        if (ids.Count == 0) throw ApiException.Bad("Please select at least one document.");
+        if (ids.Count > 500) throw ApiException.Bad("You can link at most 500 documents at a time.");
+        var docs = await db.Documents.AsNoTracking().Where(d => ids.Contains(d.Id)).Select(d => new { d.Id, d.GroupId, d.Name }).ToListAsync();
+        if (docs.Count != ids.Count) throw ApiException.NotFound("One or more documents were");
+        foreach (var d in docs)
+        {
+            await me.EnsureGroupAsync(d.GroupId);
+            if (d.GroupId != req.GroupId && !me.IsSystemAdmin)
+                throw new ApiException(StatusCodes.Status403Forbidden, "Only System Administrators can link documents of another group.");
+        }
+
+        var label = (await LabelsAsync([(type, req.EntityId)]))[(type, req.EntityId)];
+        var linked = 0;
+        var copied = 0;
+        foreach (var d in docs.OrderBy(d => ids.IndexOf(d.Id)))
+        {
+            var docId = d.Id;
+            if (d.GroupId != req.GroupId)
+            {
+                docId = await copier.MapDocumentAsync(d.Id, req.GroupId);
+                copied++;
+                audit.Log(AuditType, docId, "Copied", $"Copied from #{d.Id} {d.Name} (group #{d.GroupId}) to link it to {label}", req.GroupId);
+            }
+            if (await db.DocumentLinks.AnyAsync(l => l.DocumentId == docId && l.EntityType == type && l.EntityId == req.EntityId)) continue;
+            db.DocumentLinks.Add(new DocumentLink { DocumentId = docId, EntityType = type, EntityId = req.EntityId });
+            audit.Log(AuditType, docId, "Linked", $"Linked to {label}", req.GroupId);
+            linked++;
+        }
+        await db.SaveChangesAsync();
+        return Ok(new { message = "Document(s) Linked.", linked, copied });
     }
 
     /// <summary>DELETE /api/documents/{id}/link?entityType=Material&amp;entityId=15 — removes one link (the document stays in the library).</summary>

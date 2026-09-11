@@ -21,6 +21,9 @@ public class CurrentUser(IHttpContextAccessor http, AppDbContext db)
     /// <summary>System admins and support agents work across all groups.</summary>
     public bool SeesAllGroups => IsSystemAdmin || IsInRole(Roles.SupportAgent);
     public bool IsAdmin => IsSystemAdmin || IsGroupAdmin;
+    public IReadOnlyList<string> RoleNames => Principal.FindAll(ClaimTypes.Role).Select(c => c.Value).Distinct().ToList();
+    /// <summary>Legacy "isGroupAdmin" lock: users whose only role is FG Pro cannot change the ingredients of Complete formulas.</summary>
+    public bool IsFgProOnly => RoleNames is { Count: > 0 } r && r.All(x => x == Roles.FGPro);
 
     public async Task<List<int>> GroupIdsAsync()
     {

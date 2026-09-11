@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, CircleDashed, Copy, CopyPlus, DollarSign, Droplets, FileText, Filter, FlaskConical, History, Pencil, Plus, Printer, Trash2 } from 'lucide-react'
@@ -14,9 +14,26 @@ import { HistoryModal } from '@/components/HistoryModal'
 import { useToast } from '@/components/toast'
 import { BulkCopyModal, CopyFormulaModal, CreateFormulaModal, PrintDeniedModal, StatusBadge } from './FormulaModals'
 import { CleanNozzleModal, PurgeHistoryModal, PurgeModal } from './DispensingModals'
-import type { DispenseSettings, FormulaRow } from './types'
+import type { DispenseSettings, FormulaRow, FormulaUsage } from './types'
 
 type Status = 'all' | 'complete' | 'incomplete'
+
+/** Legacy _FormulationsListTable: the list position is kept in sessionStorage while a formula is opened. */
+const LIST_STATE_KEY = 'fg.formulas.list'
+interface ListState {
+  scroll: number
+  status: Status
+  search: string
+}
+function readListState(): ListState | null {
+  try {
+    const raw = sessionStorage.getItem(LIST_STATE_KEY)
+    return raw ? (JSON.parse(raw) as ListState) : null
+  } catch {
+    return null
+  }
+}
+const scroller = () => document.querySelector('main')
 
 export default function FormulasPage() {
   const me = useMe()
@@ -26,8 +43,10 @@ export default function FormulasPage() {
   const toast = useToast()
   const qc = useQueryClient()
 
-  const [status, setStatus] = useState<Status>('all')
-  const [search, setSearch] = useState('')
+  const [saved] = useState(readListState)
+  const [status, setStatus] = useState<Status>(saved?.status ?? 'all')
+  const [search, setSearch] = useState(saved?.search ?? '')
+  const restored = useRef(!saved)
   const [selected, setSelected] = useState<(string | number)[]>([])
   const [copyRow, setCopyRow] = useState<FormulaRow | null>(null)
   const [docsRow, setDocsRow] = useState<FormulaRow | null>(null)
@@ -54,15 +73,44 @@ export default function FormulasPage() {
     enabled: groupId > 0,
   })
   const rows = useMemo(() => q.data ?? [], [q.data])
+  const usage = useQuery({
+    queryKey: ['formula-usage', deleteRow?.id],
+    queryFn: () => api.get<FormulaUsage>(`/formulas/${deleteRow!.id}/usage`).then((r) => r.data),
+    enabled: !!deleteRow,
+  })
 
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase()
     return rows.filter(
       (r) =>
         (status === 'all' || r.isComplete === (status === 'complete')) &&
-        (!s || `${r.name} ${r.number ?? ''} ${r.customerName ?? ''}`.toLowerCase().includes(s)),
+        (!s || `${r.name} ${r.number ?? ''} ${r.customerName ?? ''} ${r.categoryName ?? ''}`.toLowerCase().includes(s)),
     )
   }, [rows, status, search])
+
+  // Remember the list position when a formula is opened; restore it (once) when coming back.
+  const rememberPosition = () => {
+    try {
+      sessionStorage.setItem(LIST_STATE_KEY, JSON.stringify({ scroll: scroller()?.scrollTop ?? 0, status, search } satisfies ListState))
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  const openFormula = (path: string) => {
+    rememberPosition()
+    navigate(path)
+  }
+  useEffect(() => {
+    if (restored.current || !q.data) return
+    restored.current = true
+    const top = saved?.scroll ?? 0
+    requestAnimationFrame(() => requestAnimationFrame(() => scroller()?.scrollTo({ top })))
+    try {
+      sessionStorage.removeItem(LIST_STATE_KEY)
+    } catch {
+      /* storage unavailable */
+    }
+  }, [q.data, saved])
 
   const stats = useMemo(() => {
     const complete = rows.filter((r) => r.isComplete).length
@@ -96,7 +144,7 @@ export default function FormulasPage() {
         key: 'name',
         header: 'Formula Name',
         cell: (r) => (
-          <Link to={`/formulas/${r.id}`} className="font-medium text-primary hover:underline">
+          <Link to={`/formulas/${r.id}`} onClick={rememberPosition} className="font-medium text-primary hover:underline">
             {r.name}
           </Link>
         ),
@@ -118,9 +166,10 @@ export default function FormulasPage() {
         align: 'right',
         hideBelow: 'lg',
         className: 'tabular-nums',
+        // Legacy "Formula Cost" = material cost of the batch (the price with mark-up and container is shown in the editor).
         cell: (r) =>
           r.ingredientCount ? (
-            <span title={`Material cost ${money(r.cost)} · formula price ${money(r.price)} · ${r.ingredientCount} ingredient${r.ingredientCount === 1 ? '' : 's'}`}>{money(r.price)}</span>
+            <span title={`Material cost ${money(r.cost)} · formula price ${money(r.price)} · ${r.ingredientCount} ingredient${r.ingredientCount === 1 ? '' : 's'}`}>{money(r.cost)}</span>
           ) : (
             <span className="text-muted-foreground">—</span>
           ),
@@ -132,7 +181,7 @@ export default function FormulasPage() {
         align: 'right',
         cell: (r) => (
           <div className="flex items-center justify-end gap-0.5">
-            <button className="btn-icon" title="Edit" onClick={() => navigate(`/formulas/${r.id}`)}>
+            <button className="btn-icon" title="Edit" onClick={() => openFormula(`/formulas/${r.id}`)}>
               <Pencil className="h-4 w-4" />
             </button>
             <button className="btn-icon" title="Copy to New" onClick={() => setCopyRow(r)}>
@@ -141,7 +190,7 @@ export default function FormulasPage() {
             <button
               className={clsx('btn-icon', !r.isComplete && 'opacity-50')}
               title={r.isComplete ? 'Print' : 'Print (incomplete formulas cannot be printed)'}
-              onClick={() => (r.isComplete ? navigate(`/formulas/${r.id}?print=1`) : setPrintDenied(true))}
+              onClick={() => (r.isComplete ? openFormula(`/formulas/${r.id}?print=1`) : setPrintDenied(true))}
             >
               <Printer className="h-4 w-4" />
             </button>
@@ -166,7 +215,8 @@ export default function FormulasPage() {
         ),
       },
     ],
-    [admin, navigate],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [admin, navigate, status, search],
   )
 
   const filtering = status !== 'all' || search.trim() !== ''
@@ -181,7 +231,9 @@ export default function FormulasPage() {
     { key: 'complete', label: 'Complete', count: stats.complete },
     { key: 'incomplete', label: 'Incomplete', count: stats.incomplete },
   ]
-  const canPurge = !!settings.data?.hasDispensers && !!settings.data?.hasBridges
+  // Purge needs a dispense machine behind a network bridge that is online right now.
+  const canPurge = !!settings.data?.hasDispensers && !!settings.data?.hasOnlineBridge
+  const usedIn = usage.data ? usage.data.processSteps.length + usage.data.processSchedules.length : 0
 
   return (
     <>
@@ -242,6 +294,7 @@ export default function FormulasPage() {
         loading={q.isLoading}
         initialSort={{ key: 'id', dir: 'desc' }}
         selectable={admin}
+        stateKey="formulas"
         selected={selected}
         onSelectedChange={setSelected}
         toolbar={
@@ -262,7 +315,7 @@ export default function FormulasPage() {
             ))}
           </div>
         }
-        toolbarRight={<SearchInput value={search} onChange={setSearch} placeholder="Search by Formula Name, Formula Number or Customer Name" className="w-full sm:w-96" />}
+        toolbarRight={<SearchInput value={search} onChange={setSearch} placeholder="Search by Formula Name, Number, Customer or Category" className="w-full sm:w-96" />}
         emptyTitle={filtering ? 'No formulas match these filters' : 'No formulas yet'}
         emptyDescription={filtering ? 'Try another status or search term.' : 'Create your first formulation to track ingredients, cost and VOC content.'}
         emptyAction={
@@ -300,7 +353,27 @@ export default function FormulasPage() {
         onClose={() => setDeleteRow(null)}
         busy={remove.isPending}
         onConfirm={() => deleteRow && remove.mutate(deleteRow.id)}
-        message={`Are you sure you want to delete the Formula "${deleteRow?.number ? `${deleteRow.number} - ` : ''}${deleteRow?.name ?? ''}"?`}
+        confirmLabel="Yes"
+        message={
+          <>
+            {`Are you sure you want to delete the Formula "${deleteRow?.number ? `${deleteRow.number} - ` : ''}${deleteRow?.name ?? ''}"?`}
+            <span className="mt-2 block text-xs text-muted-foreground" data-testid="formula-usage">
+              {usage.isLoading
+                ? 'Checking where this formula is used…'
+                : !usage.data
+                  ? ''
+                  : usedIn === 0
+                    ? 'It is not used in any process step or process schedule.'
+                    : `It is used in ${usage.data.processSteps.length} process step${usage.data.processSteps.length === 1 ? '' : 's'} and ${usage.data.processSchedules.length} process schedule${usage.data.processSchedules.length === 1 ? '' : 's'}; they will stop using it.`}
+            </span>
+            {usedIn > 0 && usage.data && (
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {[...usage.data.processSteps.map((s) => `Step: ${s.name}`), ...usage.data.processSchedules.map((s) => `Schedule: ${s.name} (#${s.number})`)].slice(0, 8).join(' · ')}
+                {usedIn > 8 ? ' …' : ''}
+              </span>
+            )}
+          </>
+        }
       />
     </>
   )

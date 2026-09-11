@@ -20,7 +20,7 @@ No ODBC driver is needed — .NET uses Microsoft.Data.SqlClient directly.
   "Databases": {
     "Dev":  { "Label": "Development", "AutoMigrate": true,
               "ConnectionString": "Server=34.74.178.204;Database=FGAPP_21_May_2024;User Id=FGAPP;Password=********;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15" },
-    "Prod": { "Label": "Production", "AutoMigrate": false, "Production": true,
+    "Prod": { "Label": "Production", "AutoMigrate": false, "Production": true, "Legacy": true,
               "ConnectionString": "Server=35.196.141.157;Database=FGAPP02232023_FULL_03012023_030118;User Id=FGAPP;Password=********;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15" }
   },
   "Database": { "Default": "Dev" },
@@ -31,7 +31,8 @@ No ODBC driver is needed — .NET uses Microsoft.Data.SqlClient directly.
 
 When more than one database is configured the sign-in page shows a **Database** switch (Development / Production).
 The session stays on the database it signed in to; the header shows a badge (amber for `"Production": true`), and
-signing out is how you switch. A single `ConnectionStrings:Default` (older config) still works as one "Dev" database.
+signing out is how you switch. `"Legacy": true` (Production) uses the old database as-is: the app reads and writes
+the old site's `dbo` tables directly (`Data/LegacyModel.cs`), with the same passwords as the old site. A single `ConnectionStrings:Default` (older config) still works as one "Dev" database.
 
 Copy `appsettings.Local.example.json` to create it. (The ODBC string
 `DRIVER={ODBC Driver 17 for SQL Server};SERVER=…;DATABASE=…;UID=…;PWD=…;Encrypt=no` maps to the
@@ -85,7 +86,7 @@ cd frontend; npx tsc -b
 dotnet build backend\FinishGenius.sln
 
 # add a database migration after changing Domain/* entities
-dotnet ef migrations add <Name> --project backend\FinishGenius.Api -o Data/Migrations
+dotnet ef migrations add <Name> --project backend\FinishGenius.Api --context AppDbContext -o Data/Migrations
 
 # run the production build locally (API serves the SPA on http://localhost:5080)
 cd frontend; npm run build; cd ..\backend\FinishGenius.Api; dotnet run --launch-profile http

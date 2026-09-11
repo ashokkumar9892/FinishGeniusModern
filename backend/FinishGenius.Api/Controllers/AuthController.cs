@@ -38,10 +38,14 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
         if (user.Disabled)
             return Unauthorized(new { message = "This account is disabled. Contact your administrator." });
 
-        if (Passwords.IsLegacyBcrypt(user.PasswordHash))
-            user.PasswordHash = Passwords.Hash(req.Password!); // upgrade legacy hash
-        user.LastLoginAt = DateTime.UtcNow;
-        await db.SaveChangesAsync();
+        // A legacy database is shared with the old site: keep its bcrypt hashes; it has no last-login column either.
+        if (!database.Current.Legacy)
+        {
+            if (Passwords.IsLegacyBcrypt(user.PasswordHash))
+                user.PasswordHash = Passwords.Hash(req.Password!); // upgrade legacy hash
+            user.LastLoginAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
         var (token, expires) = tokens.Create(user, req.RememberMe, database.Current.Key);
         return Ok(new { token, expires });
     }
@@ -50,7 +54,7 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
     [Authorize]
     public async Task<IActionResult> Me()
     {
-        var user = await db.Users.AsNoTracking().Include(u => u.Roles).FirstOrDefaultAsync(u => u.Id == me.Id && !u.IsDeleted);
+        var user =await db.Users.AsNoTracking().Include(u => u.Roles).FirstOrDefaultAsync(u => u.Id == me.Id && !u.IsDeleted);
         if (user == null || user.Disabled) return Unauthorized(new { message = "Session expired." });
         var groupIds = await me.GroupIdsAsync();
         var groups = await db.Groups.AsNoTracking().Where(g => groupIds.Contains(g.Id))
@@ -87,7 +91,7 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
         if (!Passwords.Verify(user.PasswordHash, req.CurrentPassword ?? ""))
             throw ApiException.Bad("Current password is incorrect.");
         Passwords.Validate(req.NewPassword);
-        user.PasswordHash = Passwords.Hash(req.NewPassword);
+        user.PasswordHash = Passwords.Hash(req.NewPassword, database.Current.Legacy);
         await db.SaveChangesAsync();
         return Ok(new { message = "Password changed." });
     }

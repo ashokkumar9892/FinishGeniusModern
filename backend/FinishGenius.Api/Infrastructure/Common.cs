@@ -52,11 +52,14 @@ public class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExceptionMi
     {
         while (ex != null && ex is not SqlException) ex = ex.InnerException;
         if (ex is not SqlException sql) return null;
-        string label;
-        try { label = ctx.RequestServices.GetService<DatabaseSelector>()?.Current.Label ?? "selected"; }
-        catch (Exception) { label = "selected"; }
+        DatabaseTarget? target;
+        try { target = ctx.RequestServices.GetService<DatabaseSelector>()?.Current; }
+        catch (Exception) { target = null; }
+        var label = target?.Label ?? "selected";
         if (sql.Number == 208 && sql.Message.Contains("'fg."))
-            return $"The {label} database is not set up for Finish Genius yet (the fg tables are missing). An administrator must run the \"migrate\" command for it first.";
+            return target?.Legacy == true
+                ? $"This screen is not connected to the existing {label} tables yet."
+                : $"The {label} database is not set up for Finish Genius yet (the fg tables are missing). An administrator must run the \"migrate\" command for it first.";
         if (ConnectionErrors.Contains(sql.Number))
             return $"Cannot connect to the {label} database. Check that the server is reachable and try again.";
         return null;

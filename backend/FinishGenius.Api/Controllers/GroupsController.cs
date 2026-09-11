@@ -15,7 +15,7 @@ namespace FinishGenius.Api.Controllers;
 [ApiController]
 [Authorize(Roles = Access.Everyone)]
 [Route("api/groups")]
-public class GroupsController(AppDbContext db, CurrentUser me, AuditService audit, FileStorage files, GroupCopyService copier) : ControllerBase
+public class GroupsController(AppDbContext db, CurrentUser me, AuditService audit, FileStorage files, GroupCopyService copier, DatabaseSelector database) : ControllerBase
 {
     public const string DefaultTimeZone = "Eastern Standard Time";
 
@@ -84,6 +84,7 @@ public class GroupsController(AppDbContext db, CurrentUser me, AuditService audi
     public async Task<IActionResult> Create([FromForm] GroupForm form)
     {
         me.EnsureSystemAdmin();
+        EnsureLogoSupported(form);
         var name = Text.Req(form.Name, "Full Name");
         await EnsureUniqueNameAsync(name, null);
 
@@ -110,6 +111,7 @@ public class GroupsController(AppDbContext db, CurrentUser me, AuditService audi
     public async Task<IActionResult> Update(int id, [FromForm] GroupForm form)
     {
         var g = await LoadForEditAsync(id);
+        EnsureLogoSupported(form);
         var name = Text.Req(form.Name, "Full Name");
         await EnsureUniqueNameAsync(name, id);
 
@@ -261,6 +263,13 @@ public class GroupsController(AppDbContext db, CurrentUser me, AuditService audi
         if (!me.IsAdmin)
             throw new ApiException(StatusCodes.Status403Forbidden, "Only Group Administrators and System Administrators can edit groups.");
         return await LoadAsync(id, tracking: true);
+    }
+
+    /// <summary>The old site stores logos by key, not as files this app manages.</summary>
+    private void EnsureLogoSupported(GroupForm form)
+    {
+        if (database.Current.Legacy && form.Logo is { Length: > 0 })
+            throw ApiException.Bad($"Group logos can't be changed on the {database.Current.Label} database yet.");
     }
 
     private async Task EnsureUniqueNameAsync(string name, int? exceptId)

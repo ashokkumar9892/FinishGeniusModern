@@ -45,6 +45,8 @@ public class DispensingController(AppDbContext db, CurrentUser me, AuditService 
         var s = await db.DispenseSettings.AsNoTracking().FirstOrDefaultAsync(x => x.GroupId == groupId);
         var last = await LastDispensedAtAsync(db, groupId, s);
         var types = await db.Devices.AsNoTracking().Where(d => d.GroupId == groupId && !d.IsArchived).Select(d => d.DeviceType).Distinct().ToListAsync();
+        var cutoff = DateTime.UtcNow - DevicesController.OnlineWindow;
+        var onlineBridge = await db.Devices.AnyAsync(d => d.GroupId == groupId && !d.IsArchived && d.DeviceType == DeviceType.NetworkBridge && d.LastSeenAt >= cutoff);
         return Ok(new
         {
             CleanNozzleHours = s?.CleanNozzleHours ?? 0,
@@ -53,6 +55,8 @@ public class DispensingController(AppDbContext db, CurrentUser me, AuditService 
             CleaningRequired = CleaningRequired(s, last),
             HasDispensers = types.Contains(DeviceType.DispenseMachine),
             HasBridges = types.Contains(DeviceType.NetworkBridge),
+            // Purge / machine dispense need a network bridge that is connected right now.
+            HasOnlineBridge = onlineBridge,
         });
     }
 

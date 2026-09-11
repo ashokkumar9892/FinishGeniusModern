@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AxiosError } from 'axios'
 import {
-  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Calculator, Droplets, FileSpreadsheet, FileText, FlaskConical, History, MinusCircle,
+  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Calculator, Droplets, Eye, FileSpreadsheet, FileText, FlaskConical, History, Lock, MinusCircle,
   Plus, PlusCircle, Printer, RefreshCw, RotateCcw, Save, Scale, Send, Tag, Trash2, Undo2, XSquare,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { api, download, errorMessage } from '@/lib/api'
-import { useGroup } from '@/lib/auth'
+import { useGroup, useMe } from '@/lib/auth'
+import { hasRole, isAdmin, Roles } from '@/lib/access'
 import { dateTime, money, num } from '@/lib/format'
-import { Card, Checkbox, EmptyState, ErrorBanner, Field, LoadingBlock, Note, PageHeader, Spinner } from '@/components/ui'
+import { Card, ConfirmDialog, EmptyState, ErrorBanner, Field, LoadingBlock, Note, PageHeader, Spinner } from '@/components/ui'
 import { SearchSelect } from '@/components/SearchSelect'
 import { EntityDocuments } from '@/components/EntityDocuments'
 import { useToast } from '@/components/toast'
@@ -23,13 +24,24 @@ import {
   batchScaleFactor, batchValueOf, computeTotals, deltaEMatch, flOzOf, gallonsOf, isWeightBatchType, parseNum, scaleByFactor, typeLetter, typeOrder,
 } from './formulaMath'
 import {
-  BATCH_TYPES, CONTAINER_TYPES, FORMULA_CATEGORY_TYPES, INGREDIENT_TYPES, type CategoryOption, type FormulaDetail, type InventoryBatch, type MaterialOption, type Workspace,
+  BATCH_TYPES, COMPLETE_LOCKED, CONTAINER_TYPES, FORMULA_CATEGORY_TYPES, INGREDIENT_TYPES, type CategoryOption, type FormulaDetail, type InventoryBatch, type MaterialOption,
+  type Workspace,
 } from './types'
 
 const DELTA_KEYS = ['spexDeltaL', 'spexDeltaA', 'spexDeltaB', 'spexDeltaE', 'spinDeltaL', 'spinDeltaA', 'spinDeltaB', 'spinDeltaE'] as const
 type DeltaKey = (typeof DELTA_KEYS)[number]
 const DISPENSED_FIRST = 'Please Record & Reset or revert your dispense operation.'
+const COMPLETE_FIRST = 'Please complete 2 step formula save operation before modifying batch size/type.'
 const SAVE_FIRST = 'Please save your changes first.'
+/** Equipment & Materials tab of a material type (the "Not Enough Material in Batch" link). */
+const MATERIAL_TAB: Record<number, string> = { 1: 'base', 2: 'pigment', 3: 'dye' }
+
+type SaveOptions = {
+  /** true = Formula Information "Save" (legacy step 2: the formula becomes Complete); false = "Mark as Incomplete"; omitted = keep the status. */
+  complete?: boolean
+  /** Batch-size rescale: Amount to Dispense = the new grams. */
+  reset?: boolean
+}
 
 type HeaderState = {
   name: string
@@ -75,7 +87,7 @@ interface Line {
 }
 
 const emptyHeader: HeaderState = {
-  name: '', number: '', customerName: '', categoryId: null, batchType: 2, containerType: '', containerPrice: '0', markUp: '0',
+  name: '', number: '', customerName: '', categoryId: null, batchType: 2, containerType: CONTAINER_TYPES[0], containerPrice: '0', markUp: '0',
   substrate: '', notes: '', employeeName: '', purchaseOrderNumber: '', isComplete: false,
   spinDeltaL: '', spinDeltaA: '', spinDeltaB: '', spinDeltaE: '', spexDeltaL: '', spexDeltaA: '', spexDeltaB: '', spexDeltaE: '',
 }
@@ -203,7 +215,12 @@ export default function FormulaEditPage() {
   const navigate = useNavigate()
   const toast = useToast()
   const qc = useQueryClient()
-  const { groupId, group } = useGroup()
+  const { groupId, group, groups } = useGroup()
+  const me = useMe()
+  const admin = isAdmin(me)
+  // Legacy Edit.cshtml: Calc Batch for Admin, FGPro and FGProPlus; an FG Pro-only user cannot change a Complete formula's ingredients.
+  const canCalcBatch = hasRole(me, Roles.SystemAdmin, Roles.FGPro, Roles.FGProPlus)
+  const fgProOnly = me.roles.length > 0 && me.roles.every((r) => r === Roles.FGPro)
 
   const [header, setHeader] = useState<HeaderState>(emptyHeader)
   const [lines, setLines] = useState<Line[]>([])
@@ -217,7 +234,9 @@ export default function FormulaEditPage() {
   const [printing, setPrinting] = useState<PrintMode | null>(params.get('print') === '1' ? 'formula' : null)
   const [autoPrint, setAutoPrint] = useState(params.get('print') === '1')
   const [printDenied, setPrintDenied] = useState(false)
-  const [autoSave, setAutoSave] = useState(false)
+  const [autoSave, setAutoSave] = useState<SaveOptions | null>(null)
+  const [completeAttempt, setCompleteAttempt] = useState(false)
+  const [moveTo, setMoveTo] = useState<number | null>(null)
   // picker
   const [pickType, setPickType] = useState<number>(0)
   const [pickMaterial, setPickMaterial] = useState<number | null>(null)
@@ -250,6 +269,9 @@ export default function FormulaEditPage() {
     refetchOnWindowFocus: false,
   })
   const ws = workspace.data
+  const savedComplete = !isNew && !!detail.data?.isComplete
+  const locked = savedComplete && fgProOnly
+  const lockTitle = locked ? COMPLETE_LOCKED : undefined
 
   // Populate the form whenever fresh server data arrives (first load, after save / workspace actions).
   useEffect(() => {
@@ -260,6 +282,7 @@ export default function FormulaEditPage() {
     setBaseline(snapshot(h, l))
     setLoadedAt(detail.dataUpdatedAt)
     setSubmitted(false)
+    setCompleteAttempt(false)
     setServerError(null)
   }, [isNew, detail.data, detail.dataUpdatedAt, loadedAt])
 
@@ -311,7 +334,10 @@ export default function FormulaEditPage() {
   )
   const requireNumber = isNew || !!detail.data?.number
   const requireEmployee = isNew || !detail.data?.isComplete
-  const errors = useMemo(() => validate(header, lines, requireNumber, requireEmployee), [header, lines, requireNumber, requireEmployee])
+  const errors = useMemo(
+    () => validate({ ...header, isComplete: header.isComplete || completeAttempt }, lines, requireNumber, requireEmployee),
+    [header, lines, requireNumber, requireEmployee, completeAttempt],
+  )
   const showErr = (k: string) => (submitted ? errors[k] : undefined)
 
   const sums = useMemo(() => {
@@ -324,9 +350,14 @@ export default function FormulaEditPage() {
   const usesBatches = ws?.usesBatches ?? detail.data?.usesBatches ?? false
   const batchesFor = (materialId: number): InventoryBatch[] => ws?.batches[String(materialId)] ?? []
   const projectedDispense = (l: Line) => (l.id ? Math.max(0, l.dispenseAmount + (gramsOf(l) - l.savedGrams)) : gramsOf(l))
+  /** Latest batch (batches come in creation order) — the legacy default when no batch is saved. */
+  const latestBatch = (materialId: number): InventoryBatch | null => {
+    const list = batchesFor(materialId)
+    return list.length ? list[list.length - 1] : null
+  }
   const chosenBatch = (l: Line) => {
     const list = batchesFor(l.materialId)
-    return l.batchNumber ? list.find((b) => b.batchNumber === l.batchNumber) ?? null : list.length === 1 ? list[0] : null
+    return l.batchNumber ? list.find((b) => b.batchNumber === l.batchNumber) ?? null : latestBatch(l.materialId)
   }
   const notEnough = (l: Line) => {
     const b = chosenBatch(l)
@@ -425,40 +456,39 @@ export default function FormulaEditPage() {
     let grams = parseNum(pickQty)
     if (pickQty.trim() && (grams === null || grams <= 0)) return toast.error(`Invalid Number entered [${pickQty}]`)
     const list = batchesFor(m.id)
-    if (usesBatches && list.length > 1 && !pickBatch) return toast.error('Please select batch name.')
     if (grams === null) {
       if (!scaleId) return toast.error('Please enter grams')
       grams = await takeWeight()
       if (grams === null) return
     }
-    const batch = pickBatch ? list.find((b) => b.batchNumber === pickBatch) ?? null : list.length === 1 ? list[0] : null
+    const batch = pickBatch ? list.find((b) => b.batchNumber === pickBatch) ?? null : latestBatch(m.id)
     if (batch && m.density > 0 && gallonsOf(grams, m.density) > batch.onHand) return toast.error('The selected batch does not have enough material.')
     addLine(m, grams, batch?.batchNumber ?? null)
     setPickMaterial(null)
     setPickQty('')
     setPickBatch('')
     toast.success('Material was successfully added to the color formula.')
-    if (!isNew) setAutoSave(true)
+    if (!isNew) setAutoSave({})
   }
 
   async function addToRow(l: Line) {
     let grams = parseNum(rowAdd[l.key] ?? '')
     if ((rowAdd[l.key] ?? '').trim() && (grams === null || grams <= 0)) return toast.error(`Invalid Number entered [${rowAdd[l.key]}]`)
-    if (usesBatches && batchesFor(l.materialId).length > 1 && !l.batchNumber) return toast.error('Please select batch name.')
+    if (locked) return toast.error(COMPLETE_LOCKED)
     if (grams === null) grams = await takeWeight()
     if (grams === null) return
     const add = grams
     setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, grams: String(Math.round((gramsOf(x) + add) * 10000) / 10000) } : x)))
     setRowAdd((r) => ({ ...r, [l.key]: '' }))
     toast.success('Material was successfully added to the color formula.')
-    if (!isNew) setAutoSave(true)
+    if (!isNew) setAutoSave({})
   }
 
   const updateGrams = (key: string, grams: string) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, grams } : l)))
   const removeLine = (key: string) => {
     setLines((ls) => ls.filter((l) => l.key !== key))
     toast.success('Material was successfully removed from the color formula.')
-    if (!isNew) setAutoSave(true)
+    if (!isNew) setAutoSave({})
   }
   const moveLine = (index: number, dir: -1 | 1) =>
     setLines((ls) => {
@@ -473,11 +503,15 @@ export default function FormulaEditPage() {
   const batchValue = batchValueOf(header.batchType, totals.totalGrams, totals.totalGallons)
   const batchUnit = BATCH_TYPES.find((b) => b.value === header.batchType)?.unit ?? 'g'
   const missingDensity = lines.filter((l) => l.density <= 0)
+  // Legacy formulaInputLogic: batch size / type cannot change while something is dispensed or before the formula is Complete.
+  const batchBlockReason = anyDispensed ? DISPENSED_FIRST : !isNew && !savedComplete ? COMPLETE_FIRST : null
   const applyBatchSize = () => {
     if (batchDraft === null) return
     const v = parseNum(batchDraft)
     setBatchDraft(null)
     if (v === null || Math.abs(v - batchValue) < 0.00005) return
+    if (batchBlockReason) return toast.error(batchBlockReason)
+    if (locked) return toast.error(COMPLETE_LOCKED)
     if (!isWeightBatchType(header.batchType) && missingDensity.length > 0)
       return toast.error(`No density for ${missingDensity.map((l) => l.productName).join(', ')} — a volume batch size cannot be calculated.`)
     const factor = batchScaleFactor(header.batchType, v, totals.totalGrams, totals.totalGallons)
@@ -485,18 +519,27 @@ export default function FormulaEditPage() {
     const scaled = scaleByFactor(lines.map(gramsOf), factor)
     setLines((ls) => ls.map((l, i) => ({ ...l, grams: String(scaled[i]) })))
     toast.success(`Batch set to ${num(v, 4)} ${batchUnit}.`)
+    // Legacy: the rescaled formula is saved at once and every changed row's Amount to Dispense becomes its new grams.
+    if (!isNew) setAutoSave({ reset: true })
+  }
+  const changeBatchType = (t: number) => {
+    if (t === header.batchType) return
+    if (batchBlockReason) return toast.error(batchBlockReason)
+    set('batchType', t)
+    if (!isNew) setAutoSave({})
   }
 
   // ---------------- save
   const save = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (opts: SaveOptions) => {
       const body = {
         groupId: gid,
         categoryId: header.categoryId,
         name: header.name.trim(),
         number: header.number.trim() || null,
         customerName: header.customerName.trim() || null,
-        isComplete: header.isComplete,
+        isComplete: opts.complete ?? header.isComplete,
+        resetDispenseAmounts: !!opts.reset,
         batchType: header.batchType,
         containerType: header.containerType.trim() || null,
         containerPrice,
@@ -522,26 +565,33 @@ export default function FormulaEditPage() {
       if (isNew) navigate(`/formulas/${res.id}`, { replace: true })
       else refreshAll()
     },
-    onError: (e) => {
+    onError: (e, opts) => {
       setServerError(errorMessage(e))
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })
+      // A refused batch-size rescale must not leave the rescaled (unsaved) grams behind: reload the saved formula.
+      if (!isNew && opts.reset) refreshAll()
     },
   })
 
-  const submit = () => {
+  /** Validates and saves; returns false when the form has errors. */
+  const submit = (opts: SaveOptions = {}) => {
     setSubmitted(true)
-    if (Object.keys(errors).length > 0) {
+    if (opts.complete) setCompleteAttempt(true)
+    const errs = validate({ ...header, isComplete: opts.complete ?? header.isComplete }, lines, requireNumber, requireEmployee)
+    if (Object.keys(errs).length > 0) {
       setServerError('Please fix the highlighted fields.')
-      return
+      return false
     }
-    save.mutate()
+    save.mutate(opts)
+    return true
   }
 
-  // Legacy saved the formula after every material add / remove.
+  // Legacy saved the formula after every material add / remove, batch size and batch type change.
   useEffect(() => {
     if (!autoSave) return
-    setAutoSave(false)
-    submit()
+    const opts = autoSave
+    setAutoSave(null)
+    submit(opts)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSave])
 
@@ -574,6 +624,39 @@ export default function FormulaEditPage() {
       qc.invalidateQueries({ queryKey: ['formula-history', id] })
     },
     onError,
+  })
+
+  // Legacy default: a material with several batches and none saved uses its latest batch; the choice is saved on load.
+  const defaulted = useRef('')
+  useEffect(() => {
+    if (isNew || !ws || !usesBatches) return
+    const todo = lines.filter((l) => l.id && !l.batchNumber && batchesFor(l.materialId).length > 1)
+    const sig = `${loadedAt}:${todo.map((l) => l.id).join(',')}`
+    if (todo.length === 0 || defaulted.current === sig) return
+    defaulted.current = sig
+    const picks = new Map(todo.map((l) => [l.key, latestBatch(l.materialId)!.batchNumber]))
+    Promise.all(todo.map((l) => api.put(`/formulas/${id}/ingredients/${l.id}/batch`, { batchNumber: picks.get(l.key) })))
+      .then(() => {
+        setLines((ls) => ls.map((l) => (picks.has(l.key) && !l.batchNumber ? { ...l, batchNumber: picks.get(l.key)! } : l)))
+        qc.invalidateQueries({ queryKey: ['formula-history', id] })
+      })
+      .catch(() => undefined)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws, lines, loadedAt, usesBatches, isNew])
+
+  const moveGroup = useMutation({
+    mutationFn: (target: number) => api.put<{ message: string }>(`/formulas/${id}/group`, { groupId: target }),
+    onSuccess: (res) => {
+      setMoveTo(null)
+      toast.success(res.data.message)
+      qc.invalidateQueries({ queryKey: ['materials'] })
+      qc.invalidateQueries({ queryKey: ['documents'] })
+      refreshAll()
+    },
+    onError: (e) => {
+      setMoveTo(null)
+      toast.error(errorMessage(e))
+    },
   })
   const rowAction = useMutation({
     mutationFn: ({ line, action }: { line: Line; action: 'mark-dispensed' | 'revert-dispensed' | 'reset-dispense' }) =>
@@ -619,7 +702,8 @@ export default function FormulaEditPage() {
     },
   })
   const sendLabel = useMutation({
-    mutationFn: (customerLabel: boolean) => api.post<{ message: string; commandId: number }>(`/formulas/${id}/print-label`, { printerDeviceId: labelPrinter, customerLabel }),
+    mutationFn: ({ customerLabel, printerDeviceId }: { customerLabel: boolean; printerDeviceId: number | null }) =>
+      api.post<{ message: string; commandId: number }>(`/formulas/${id}/print-label`, { printerDeviceId, customerLabel }),
     onSuccess: (res) => {
       toast.success(res.data.message)
       qc.invalidateQueries({ queryKey: ['formula-workspace', id] })
@@ -642,13 +726,47 @@ export default function FormulaEditPage() {
     return true
   }
 
+  /** Saves pending edits first (legacy saveFormulaAjax before printing); false when the form cannot be saved. */
+  const ensureSaved = async (): Promise<boolean> => {
+    if (isNew) {
+      toast.error('Save the formula first.')
+      return false
+    }
+    if (!dirty) return true
+    setSubmitted(true)
+    if (Object.keys(validate(header, lines, requireNumber, requireEmployee)).length > 0) {
+      setServerError('Please fix the highlighted fields.')
+      return false
+    }
+    try {
+      await save.mutateAsync({})
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  // One-click can labels (legacy printLabel / PrintCanLabel): straight to the network label printer; without any label
+  // printer in the group the browser prints the label instead.
+  const hasPrinters = (ws?.printers.length ?? 0) > 0
+  const printFormulaLabel = async () => {
+    if (!hasPrinters) return openPrint('label')
+    if (!ws?.printerDeviceId) return toast.error('Please Select a Printer!')
+    if (await ensureSaved()) sendLabel.mutate({ customerLabel: false, printerDeviceId: ws.printerDeviceId })
+  }
+  const printCustomerLabel = async () => {
+    if (!header.isComplete) return setPrintDenied(true)
+    if (!hasPrinters) return openPrint('customerLabel')
+    if (!ws?.printerDeviceId) return toast.error('Printer is not selected')
+    if (await ensureSaved()) sendLabel.mutate({ customerLabel: true, printerDeviceId: null })
+  }
+
   const onDispense = () => {
     if (!needSaved() || !ws) return
     if (ws.nozzle.cleaningRequired) return setNozzleOpen(true)
     if (!ws.dispenserId) return toast.error('Please select a dispenser device to continue.')
+    if (dispenser && !dispenser.bridgeOnline) return toast.error(`The network bridge of ${dispenser.name} is offline.`)
     if (lines.some((l) => notEnough(l))) return toast.error('Add Material to Batch')
-    if (usesBatches && lines.some((l) => (l.materialType === 2 || l.materialType === 3) && l.dispenseAmount > 0 && batchesFor(l.materialId).length > 1 && !l.batchNumber))
-      return toast.error('Please select batch name.')
     dispense.mutate()
   }
 
@@ -661,6 +779,7 @@ export default function FormulaEditPage() {
 
   async function onRecalc(l: Line) {
     if (!needSaved()) return
+    if (locked) return toast.error(COMPLETE_LOCKED)
     if (anyDispensed) return toast.error(DISPENSED_FIRST)
     if (scaleId) {
       const w = await takeWeight()
@@ -673,6 +792,7 @@ export default function FormulaEditPage() {
 
   const onReweigh = () => {
     if (!needSaved()) return
+    if (locked) return toast.error(COMPLETE_LOCKED)
     if (anyDispensed) return toast.error(DISPENSED_FIRST)
     const v = parseNum(reweigh)
     if (v === null || v <= 0) return toast.error('No valid weight entered for batch')
@@ -774,7 +894,11 @@ export default function FormulaEditPage() {
                 className="btn-secondary"
                 disabled={sendLabel.isPending || dirty}
                 title={dirty ? 'Save your changes first' : 'Send the label to the network label printer'}
-                onClick={() => (labelPrinter || printing === 'customerLabel' ? sendLabel.mutate(printing === 'customerLabel') : toast.error('Please Select a Printer!'))}
+                onClick={() =>
+                  labelPrinter || printing === 'customerLabel'
+                    ? sendLabel.mutate({ customerLabel: printing === 'customerLabel', printerDeviceId: labelPrinter })
+                    : toast.error('Please Select a Printer!')
+                }
               >
                 {sendLabel.isPending ? <Spinner /> : <Send className="h-4 w-4" />} Send to label printer
               </button>
@@ -792,6 +916,10 @@ export default function FormulaEditPage() {
   const title = isNew ? 'New Formulation' : `Edit Formula: ${header.name || detail.data?.name || ''}${header.number ? ` - ${header.number}` : ''}`
   const busyWorkspace = rowAction.isPending || recalc.isPending || reweighM.isPending || record.isPending || undo.isPending || dispense.isPending
   const showAddColumn = !!scaleId
+  const showCalc = !isNew && canCalcBatch
+  // Machine dispensing needs a dispense machine whose network bridge is online.
+  const canMachineDispense = (ws?.dispensers ?? []).some((d) => d.bridgeOnline)
+  const groupOptions = detail.data && !groups.some((g) => g.id === detail.data!.groupId) ? [{ id: detail.data.groupId, name: detail.data.groupName }, ...groups] : groups
   const hasDevices = !!ws && (ws.scales.length > 0 || ws.dispensers.length > 0 || ws.printers.length > 0)
 
   return (
@@ -828,7 +956,12 @@ export default function FormulaEditPage() {
             <button className="btn-secondary" onClick={() => openPrint('formula')} title={header.isComplete ? 'Print' : 'Incomplete formulas cannot be printed'}>
               <Printer className="h-4 w-4" /> Print
             </button>
-            <button className="btn-primary" onClick={submit} disabled={save.isPending || (!dirty && !isNew)}>
+            <button
+              className="btn-primary"
+              onClick={() => submit()}
+              disabled={save.isPending || (!dirty && !isNew)}
+              title={header.isComplete ? 'Save' : 'Save as a draft (the formula stays Incomplete)'}
+            >
               {save.isPending ? <Spinner /> : <Save className="h-4 w-4" />} Save
             </button>
           </>
@@ -856,7 +989,16 @@ export default function FormulaEditPage() {
                     options={ws.scales}
                     placeholder="Please select a scale..."
                     busy={setDevice.isPending && setDevice.variables?.kind === 'scale'}
-                    onChange={(v) => setDevice.mutate({ kind: 'scale', deviceId: v })}
+                    onChange={(v) => {
+                      setDevice.mutate({ kind: 'scale', deviceId: v })
+                      // The scale unit decides the batch type: a kilogram scale weighs in Kilograms, a gram scale in Grams.
+                      const s = ws.scales.find((x) => x.id === v)
+                      const bt = s ? (s.unit === 'kg' ? 4 : 2) : null
+                      if (bt && bt !== header.batchType) {
+                        set('batchType', bt)
+                        setAutoSave({})
+                      }
+                    }}
                   />
                 )}
                 {ws.dispensers.length > 0 && (
@@ -912,6 +1054,11 @@ export default function FormulaEditPage() {
           >
             {/* Material picker: Base Materials / Pigments / Dyes (+ Products) with Qty and batch, like the legacy three tables. */}
             <div className="space-y-2 border-b p-3">
+              {locked && (
+                <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+                  <Lock className="h-4 w-4 shrink-0" /> {COMPLETE_LOCKED}
+                </div>
+              )}
               <div className="inline-flex flex-wrap rounded-md border bg-muted/40 p-0.5" role="group" aria-label="Material type">
                 {[
                   { v: 0, l: 'All' },
@@ -940,13 +1087,17 @@ export default function FormulaEditPage() {
                     setPickMaterial(v)
                     setPickBatch('')
                   }}
-                  placeholder={materialsQ.isLoading ? 'Loading materials…' : 'Search materials to add to the formula'}
-                  disabled={materialsQ.isLoading || gid <= 0}
+                  placeholder={materialsQ.isLoading ? 'Loading materials…' : locked ? COMPLETE_LOCKED : 'Search materials to add to the formula'}
+                  disabled={materialsQ.isLoading || gid <= 0 || locked}
                   emptyText={materialsQ.data ? 'No matching materials (already added materials are hidden)' : 'No results found'}
                 />
                 {usesBatches && pickedMaterial && (
                   <select className="input md:w-52" value={pickBatch} onChange={(e) => setPickBatch(e.target.value)} aria-label="Batch #">
-                    {pickBatches.length === 0 ? <option value="">No Inventory Setup</option> : <option value="">Select batch...</option>}
+                    {pickBatches.length === 0 ? (
+                      <option value="">No Inventory Setup</option>
+                    ) : (
+                      <option value="">Latest batch (#{pickBatches[pickBatches.length - 1].batchNumber})</option>
+                    )}
                     {pickBatches.map((b) => (
                       <option key={b.batchNumber} value={b.batchNumber}>
                         #{b.batchNumber} - {num(b.onHand, 2)} Gal
@@ -955,7 +1106,12 @@ export default function FormulaEditPage() {
                   </select>
                 )}
                 <NumInput className="md:w-36" value={pickQty} onChange={setPickQty} suffix="g" placeholder={scale ? (scale.unit === 'kg' ? 'KiloGrams' : 'Grams') : 'Grams'} ariaLabel="Qty" onEnter={() => void addFromPicker()} />
-                <button className="btn-primary" onClick={() => void addFromPicker()} disabled={!pickMaterial || !!scaleBusy} title={scaleId ? 'Leave Qty empty to take the weight from the scale' : undefined}>
+                <button
+                  className="btn-primary"
+                  onClick={() => void addFromPicker()}
+                  disabled={!pickMaterial || !!scaleBusy || locked}
+                  title={lockTitle ?? (scaleId ? 'Leave Qty empty to take the weight from the scale' : undefined)}
+                >
                   <Plus className="h-4 w-4" /> Add
                 </button>
               </div>
@@ -976,7 +1132,7 @@ export default function FormulaEditPage() {
                     <tr>
                       <th className="th w-16">Order</th>
                       <th className="th w-8 text-center">T</th>
-                      {!isNew && <th className="th text-center" title="Calc Batch">Calc</th>}
+                      {showCalc && <th className="th text-center" title="Calc Batch">Calc</th>}
                       <th className="th">Prod Name</th>
                       <th className="th hidden md:table-cell">Prod #</th>
                       {usesBatches && <th className="th">Batch #</th>}
@@ -1010,10 +1166,10 @@ export default function FormulaEditPage() {
                           <td className="td">
                             <div className="flex items-center gap-0.5">
                               <span className="w-5 text-xs tabular-nums text-muted-foreground">{i + 1}</span>
-                              <button className="btn-icon h-6 w-6" title="Move up" disabled={i === 0} onClick={() => moveLine(i, -1)}>
+                              <button className="btn-icon h-6 w-6" title={lockTitle ?? 'Move up'} disabled={i === 0 || locked} onClick={() => moveLine(i, -1)}>
                                 <ArrowUp className="h-3.5 w-3.5" />
                               </button>
-                              <button className="btn-icon h-6 w-6" title="Move down" disabled={i === lines.length - 1} onClick={() => moveLine(i, 1)}>
+                              <button className="btn-icon h-6 w-6" title={lockTitle ?? 'Move down'} disabled={i === lines.length - 1 || locked} onClick={() => moveLine(i, 1)}>
                                 <ArrowDown className="h-3.5 w-3.5" />
                               </button>
                             </div>
@@ -1024,10 +1180,15 @@ export default function FormulaEditPage() {
                               {typeLetter(l.materialType)}
                             </span>
                           </td>
-                          {!isNew && (
+                          {showCalc && (
                             <td className="td text-center">
                               {l.materialType === 1 && l.id && (
-                                <button className="btn-icon h-7 w-7 text-primary" title="Calc Batch — recalculate the formula from the weighed amount of this base" disabled={busyWorkspace || !!scaleBusy} onClick={() => void onRecalc(l)}>
+                                <button
+                                  className="btn-icon h-7 w-7 text-primary"
+                                  title={lockTitle ?? 'Calc Batch — recalculate the formula from the weighed amount of this base'}
+                                  disabled={busyWorkspace || !!scaleBusy || locked}
+                                  onClick={() => void onRecalc(l)}
+                                >
                                   <RefreshCw className="h-4 w-4" />
                                 </button>
                               )}
@@ -1069,11 +1230,28 @@ export default function FormulaEditPage() {
                                   ))}
                                 </select>
                               )}
-                              {short && <div className="mt-0.5 text-[11px] font-medium text-red-800">Not Enough Material in Batch</div>}
+                              {short && (
+                                <Link
+                                  to={`/materials#${MATERIAL_TAB[l.materialType] ?? 'base'}`}
+                                  className="mt-0.5 block text-[11px] font-medium text-red-800 underline-offset-2 hover:underline"
+                                  title="Add material to the batch in Equipment & Materials"
+                                >
+                                  Not Enough Material in Batch
+                                </Link>
+                              )}
                             </td>
                           )}
                           <td className="td text-right">
-                            <NumInput className="ml-auto w-28" value={l.grams} onChange={(v) => updateGrams(l.key, v)} suffix="g" invalid={!!err} autoFocus={l.key === lastAdded} ariaLabel={`Grams of ${l.productName}`} />
+                            <NumInput
+                              className="ml-auto w-28"
+                              value={l.grams}
+                              onChange={(v) => updateGrams(l.key, v)}
+                              suffix="g"
+                              invalid={!!err}
+                              autoFocus={l.key === lastAdded}
+                              ariaLabel={`Grams of ${l.productName}`}
+                              readOnly={locked}
+                            />
                             {err && <div className="mt-0.5 text-[11px] text-destructive">{err}</div>}
                           </td>
                           <td className="td text-right tabular-nums">{totals.totalGrams > 0 ? `${num((g / totals.totalGrams) * 100, 2)}%` : '—'}</td>
@@ -1085,7 +1263,7 @@ export default function FormulaEditPage() {
                           {showAddColumn && (
                             <td className="td">
                               <div className="flex items-center gap-1">
-                                <button className="btn-icon h-7 w-7" title="Add material (from the scale when no grams are entered)" disabled={!!scaleBusy} onClick={() => void addToRow(l)}>
+                                <button className="btn-icon h-7 w-7" title={lockTitle ?? 'Add material (from the scale when no grams are entered)'} disabled={!!scaleBusy || locked} onClick={() => void addToRow(l)}>
                                   <PlusCircle className="h-4 w-4" />
                                 </button>
                                 {l.materialType !== 1 && (
@@ -1103,7 +1281,7 @@ export default function FormulaEditPage() {
                             </td>
                           )}
                           <td className="td">
-                            <button className="btn-icon hover:text-destructive" title="Remove Material" onClick={() => removeLine(l.key)}>
+                            <button className="btn-icon hover:text-destructive" title={lockTitle ?? 'Remove Material'} disabled={locked} onClick={() => removeLine(l.key)}>
                               <Trash2 className="h-4 w-4" />
                             </button>
                           </td>
@@ -1153,7 +1331,7 @@ export default function FormulaEditPage() {
                   </tbody>
                   <tfoot className="border-t-2 bg-muted/40 font-semibold">
                     <tr>
-                      <td className="td" colSpan={isNew ? 3 : 4}>
+                      <td className="td" colSpan={showCalc ? 4 : 3}>
                         Total
                       </td>
                       <td className="td hidden md:table-cell" />
@@ -1182,7 +1360,7 @@ export default function FormulaEditPage() {
           {/* Batch size, reweigh, dispense / record */}
           <Card title="Batch Size">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <Field label={`Batch Size (${batchUnit})`} hint="Changing it rescales every ingredient.">
+              <Field label={`Batch Size (${batchUnit})`} hint={batchBlockReason ?? lockTitle ?? 'Changing it rescales every ingredient (saved at once).'}>
                 <NumInput
                   value={batchDraft ?? (batchValue ? String(Math.round(batchValue * 10000) / 10000) : '')}
                   onChange={setBatchDraft}
@@ -1194,7 +1372,7 @@ export default function FormulaEditPage() {
                 />
               </Field>
               <Field label="Batch Type">
-                <select className="input" value={header.batchType} onChange={(e) => set('batchType', Number(e.target.value))} aria-label="Batch Type">
+                <select className="input" value={header.batchType} onChange={(e) => changeBatchType(Number(e.target.value))} aria-label="Batch Type" title={batchBlockReason ?? undefined}>
                   {BATCH_TYPES.map((b) => (
                     <option key={b.value} value={b.value}>
                       {b.label}
@@ -1210,7 +1388,7 @@ export default function FormulaEditPage() {
                       <Scale className="h-4 w-4" />
                     </button>
                   )}
-                  <button className="btn-primary" onClick={onReweigh} disabled={isNew || reweighM.isPending}>
+                  <button className="btn-primary" onClick={onReweigh} disabled={isNew || reweighM.isPending || locked} title={lockTitle}>
                     {reweighM.isPending ? <Spinner /> : null} GO
                   </button>
                 </div>
@@ -1221,7 +1399,7 @@ export default function FormulaEditPage() {
             </div>
             {!isNew && (
               <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t pt-4">
-                {(ws?.dispensers.length ?? 0) > 0 && (
+                {canMachineDispense && (
                   <button className="btn-primary" onClick={onDispense} disabled={dispense.isPending || !!dispenseCmd}>
                     {dispense.isPending ? <Spinner /> : <Droplets className="h-4 w-4" />} Dispense
                   </button>
@@ -1234,9 +1412,19 @@ export default function FormulaEditPage() {
                 <button className="btn-secondary" onClick={onRecord} disabled={record.isPending}>
                   {record.isPending ? <Spinner /> : <RotateCcw className="h-4 w-4" />} Record &amp; Reset
                 </button>
-                <button className="btn-secondary" onClick={() => openPrint('label')}>
-                  <Tag className="h-4 w-4" /> Print Formula Can Label
-                </button>
+                <div className="inline-flex">
+                  <button
+                    className="btn-secondary rounded-r-none"
+                    onClick={() => void printFormulaLabel()}
+                    disabled={sendLabel.isPending || save.isPending}
+                    title={hasPrinters ? 'Send the formula can label to the selected label printer' : 'Print the formula can label from the browser'}
+                  >
+                    {sendLabel.isPending && !sendLabel.variables?.customerLabel ? <Spinner /> : <Tag className="h-4 w-4" />} Print Formula Can Label
+                  </button>
+                  <button className="btn-secondary -ml-px rounded-l-none px-2.5" onClick={() => openPrint('label')} title="Preview the formula can label (browser print)" aria-label="Preview Formula Can Label">
+                    <Eye className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             )}
             {isNew && <p className="mt-3 text-xs text-muted-foreground">Save the formula to use scales, batches, dispensing and labels.</p>}
@@ -1311,8 +1499,17 @@ export default function FormulaEditPage() {
               <Field label="Formula Name" required error={showErr('name')}>
                 <input className={clsx('input', showErr('name') && 'input-invalid')} value={header.name} maxLength={200} autoFocus={isNew} onChange={(e) => set('name', e.target.value)} />
               </Field>
-              <Field label="Formula #" required={requireNumber} error={showErr('number')}>
-                <input className={clsx('input', showErr('number') && 'input-invalid')} value={header.number} maxLength={100} onChange={(e) => set('number', e.target.value)} />
+              <Field label="Formula #" required={requireNumber && isNew} error={showErr('number')} hint={isNew ? undefined : 'Use Copy to New for a different number.'}>
+                {/* Legacy FormulaPrice: the number of an existing formula is read-only. */}
+                <input
+                  className={clsx('input', showErr('number') && 'input-invalid', !isNew && 'bg-muted/50')}
+                  value={header.number}
+                  maxLength={100}
+                  readOnly={!isNew}
+                  aria-readonly={!isNew}
+                  onChange={(e) => set('number', e.target.value)}
+                  aria-label="Formula #"
+                />
               </Field>
               <Field label="Total Weight (g)">
                 <input className="input bg-muted/50 tabular-nums" readOnly value={num(totals.totalGrams, 2)} aria-label="Total Weight (g)" />
@@ -1329,15 +1526,71 @@ export default function FormulaEditPage() {
               <Field label="Notes" className="sm:col-span-2">
                 <textarea className="input" rows={3} maxLength={4000} value={header.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Mixing instructions, application notes…" />
               </Field>
-              <Field label="Status" error={showErr('isComplete')} hint="Legacy step 2: a formula becomes Complete when it is saved with its price and information." className="sm:col-span-2">
-                <Checkbox checked={header.isComplete} onChange={(v) => set('isComplete', v)} label="Complete — this formulation is finished and approved" />
+              {admin && !isNew && detail.data && (
+                <Field label="Group" hint="Administrators can move the formula (ingredients, category and documents) to another group.">
+                  <select
+                    className="input"
+                    value={detail.data.groupId}
+                    disabled={moveGroup.isPending}
+                    aria-label="Group"
+                    onChange={(e) => {
+                      const target = Number(e.target.value)
+                      if (target === detail.data!.groupId) return
+                      if (dirty) return toast.error(SAVE_FIRST)
+                      setMoveTo(target)
+                    }}
+                  >
+                    {groupOptions.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              <Field
+                label="Status"
+                error={showErr('isComplete')}
+                hint={savedComplete ? undefined : 'Save below completes the formula (legacy step 2). The Save at the top keeps it Incomplete.'}
+                className="sm:col-span-2"
+              >
+                <div className="flex flex-wrap items-center gap-3" data-testid="formula-status">
+                  <StatusBadge complete={header.isComplete} />
+                  {admin && savedComplete && (
+                    <button className="btn-ghost btn-sm" onClick={() => submit({ complete: false })} disabled={save.isPending} title="Administrators: set the formula back to Incomplete">
+                      Mark as Incomplete
+                    </button>
+                  )}
+                </div>
               </Field>
             </div>
             <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-4">
-              <button className="btn-secondary" onClick={() => openPrint('customerLabel')} disabled={isNew} title={header.isComplete ? undefined : 'Incomplete formulas cannot be printed'}>
-                <Tag className="h-4 w-4" /> Print Customer Can Label
-              </button>
-              <button className="btn-primary" onClick={submit} disabled={save.isPending || (!dirty && !isNew)}>
+              <div className="inline-flex">
+                <button
+                  className="btn-secondary rounded-r-none"
+                  onClick={() => void printCustomerLabel()}
+                  disabled={isNew || sendLabel.isPending || save.isPending}
+                  title={!header.isComplete ? 'Incomplete formulas cannot be printed' : hasPrinters ? 'Send the customer can label to your default label printer' : 'Print the customer can label from the browser'}
+                >
+                  {sendLabel.isPending && sendLabel.variables?.customerLabel ? <Spinner /> : <Tag className="h-4 w-4" />} Print Customer Can Label
+                </button>
+                <button
+                  className="btn-secondary -ml-px rounded-l-none px-2.5"
+                  onClick={() => openPrint('customerLabel')}
+                  disabled={isNew}
+                  title="Preview the customer can label (browser print)"
+                  aria-label="Preview Customer Can Label"
+                >
+                  <Eye className="h-4 w-4" />
+                </button>
+              </div>
+              <button
+                className="btn-primary"
+                onClick={() => submit({ complete: true })}
+                disabled={save.isPending || (savedComplete && !dirty)}
+                title={savedComplete ? 'Save' : 'Save the formula information and mark the formula Complete'}
+                data-testid="save-complete"
+              >
                 {save.isPending ? <Spinner /> : <Save className="h-4 w-4" />} Save
               </button>
               <button className="btn-secondary" onClick={() => openPrint('formula')}>
@@ -1427,6 +1680,16 @@ export default function FormulaEditPage() {
         }}
       />
       <PrintDeniedModal open={printDenied} onClose={() => setPrintDenied(false)} />
+      <ConfirmDialog
+        open={moveTo !== null}
+        title="Move Formula"
+        danger={false}
+        confirmLabel="Move"
+        busy={moveGroup.isPending}
+        onClose={() => setMoveTo(null)}
+        onConfirm={() => moveTo !== null && moveGroup.mutate(moveTo)}
+        message={`Move the formula "${header.name}" to the ${groupOptions.find((g) => g.id === moveTo)?.name ?? ''} group? Its category and ingredients are matched by name in that group (and created when missing); linked documents are copied along.`}
+      />
     </>
   )
 }

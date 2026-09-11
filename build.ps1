@@ -63,7 +63,7 @@ Step 'Generating idempotent database script'
 $sql = Join-Path $root 'database\FinishGenius_schema.sql'
 if (-not (Get-Command dotnet-ef -ErrorAction SilentlyContinue)) { dotnet tool install --global dotnet-ef | Out-Null }
 # Release configuration: a locally running dev instance keeps the Debug output locked.
-dotnet ef migrations script --idempotent --project $api --configuration Release --output $sql
+dotnet ef migrations script --idempotent --project $api --context AppDbContext --configuration Release --output $sql
 if ($LASTEXITCODE) { Write-Warning 'Could not generate the SQL script (the app still migrates itself on startup).' }
 else { Copy-Item $sql $out -Force }
 

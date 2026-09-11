@@ -10,6 +10,11 @@ public class DatabaseTarget
     public bool AutoMigrate { get; init; }
     /// <summary>Live data: the UI shows a warning on sign-in and a highlighted badge in the header.</summary>
     public bool Production { get; init; }
+    /// <summary>
+    /// The old Finish Genius database used as-is: the app reads and writes its dbo tables through
+    /// <see cref="FinishGenius.Api.Data.LegacyAppDbContext"/> (screens not mapped yet say so) and never migrates it.
+    /// </summary>
+    public bool Legacy { get; init; }
 }
 
 /// <summary>
@@ -37,8 +42,9 @@ public class DatabaseCatalog
                 Key = s.Key,
                 Label = s["Label"] ?? s.Key,
                 ConnectionString = s["ConnectionString"]!,
-                AutoMigrate = s.GetValue("AutoMigrate", autoMigrate),
+                AutoMigrate = !s.GetValue("Legacy", false) && s.GetValue("AutoMigrate", autoMigrate),
                 Production = s.GetValue("Production", false),
+                Legacy = s.GetValue("Legacy", false),
             })
             .ToList();
 

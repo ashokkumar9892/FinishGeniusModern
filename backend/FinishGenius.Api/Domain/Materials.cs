@@ -206,6 +206,12 @@ public class Formula : GroupOwned
     public bool IsDeleted { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
+    /// <summary>
+    /// The formula's mirror <see cref="Material"/> (type Formula) that process steps / schedules pick. Legacy formulations were
+    /// materials themselves, so imported mirrors have Id == formula Id; new formulas get their own material row, linked here.
+    /// </summary>
+    public int? MaterialId { get; set; }
+    public Material? Mirror { get; set; }
     public List<FormulaIngredient> Ingredients { get; set; } = [];
 }
 

@@ -159,7 +159,8 @@ function FormulaSheet({ data }: { data: PrintData }) {
         </tbody>
       </table>
 
-      {t.price > 0 && (
+      {/* Legacy Print.cshtml: the Total section shows when the formula (material) cost is not $0.00. */}
+      {t.materialCost > 0 && (
         <section className="mt-4 break-inside-avoid">
           <h2 className="text-xs font-bold uppercase tracking-wide">Total</h2>
           <table className="mt-1 w-full border border-slate-300 text-sm">
@@ -179,7 +180,7 @@ function FormulaSheet({ data }: { data: PrintData }) {
                   {money(data.containerPrice)}
                   {data.containerType ? ` (${data.containerType})` : ''}
                 </td>
-                <td className="px-2 py-1 tabular-nums">{money(t.price)}</td>
+                <td className="px-2 py-1 tabular-nums">{money(t.materialCost)}</td>
               </tr>
             </tbody>
           </table>

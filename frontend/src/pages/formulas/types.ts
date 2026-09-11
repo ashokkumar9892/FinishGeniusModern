@@ -89,6 +89,8 @@ export interface FormulaDetail {
   createdAt: string
   updatedAt?: string | null
   createdByName?: string | null
+  /** Mirror material (type Formula) that process steps pick. */
+  materialId?: number | null
   usesBatches: boolean
   hasUndoDispense: boolean
   ingredients: FormulaIngredientDto[]
@@ -211,4 +213,15 @@ export interface DispenseSettings {
   cleaningRequired: boolean
   hasDispensers: boolean
   hasBridges: boolean
+  /** A network bridge of the group is connected right now (Purge / machine dispense need one). */
+  hasOnlineBridge: boolean
 }
+
+/** GET /api/formulas/{id}/usage. */
+export interface FormulaUsage {
+  processSteps: { id: number; name: string }[]
+  processSchedules: { id: number; name: string; number: string }[]
+}
+
+/** "Complete formulas can only be changed by an administrator." (legacy FG Pro lock). */
+export const COMPLETE_LOCKED = 'Complete formulas can only be changed by an administrator.'

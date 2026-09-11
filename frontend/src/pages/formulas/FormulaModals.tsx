@@ -8,7 +8,7 @@ import { useGroup } from '@/lib/auth'
 import { ErrorBanner, Field, Modal, Spinner } from '@/components/ui'
 import { SearchSelect } from '@/components/SearchSelect'
 import { useToast } from '@/components/toast'
-import { FORMULA_CATEGORY_TYPES, type CategoryOption } from './types'
+import { CONTAINER_TYPES, FORMULA_CATEGORY_TYPES, type CategoryOption } from './types'
 
 export function StatusBadge({ complete }: { complete: boolean }) {
   return (
@@ -57,7 +57,7 @@ export function CreateFormulaModal({ open, onClose }: { open: boolean; onClose: 
   const create = useMutation({
     mutationFn: () =>
       api.post<{ message: string; id: number }>('/formulas', {
-        groupId: gid, categoryId, name: name.trim(), number: number.trim(), isComplete: false, batchType: 2, containerPrice: 0, markUp: 0, ingredients: [],
+        groupId: gid, categoryId, name: name.trim(), number: number.trim(), isComplete: false, batchType: 2, containerType: CONTAINER_TYPES[0], containerPrice: 0, markUp: 0, ingredients: [],
       }),
     onSuccess: (res) => {
       toast.success(res.data.message)
@@ -132,8 +132,9 @@ export function CopyFormulaModal({ formula, onClose, onCopied }: {
 
   useEffect(() => {
     if (formula) {
+      // Legacy Copy view prefilled both fields with the source formula.
       setName(formula.name)
-      setNumber('')
+      setNumber(formula.number ?? '')
       setError(null)
     }
   }, [formula])

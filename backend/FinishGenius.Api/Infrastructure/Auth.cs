@@ -51,6 +51,10 @@ public static class Passwords
 
     public static string Hash(string password) => Hasher.HashPassword(null!, password);
 
+    /// <summary>A legacy database is shared with the old site, which only understands bcrypt.</summary>
+    public static string Hash(string password, bool legacy) =>
+        legacy ? BCrypt.Net.BCrypt.HashPassword(password, BCrypt.Net.BCrypt.GenerateSalt(12)) : Hash(password);
+
     /// <summary>Accounts imported from the legacy app keep their bcrypt hashes until the next successful login.</summary>
     public static bool IsLegacyBcrypt(string? hash) => hash != null && hash.StartsWith("$2");
 

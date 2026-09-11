@@ -123,6 +123,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         b.Entity<InventoryTransaction>().HasIndex(x => new { x.GroupId, x.BatchNumber });
         b.Entity<PurchaseOrder>().HasMany(x => x.Lines).WithOne().HasForeignKey(x => x.PurchaseOrderId).OnDelete(DeleteBehavior.Cascade);
         b.Entity<Formula>().HasMany(x => x.Ingredients).WithOne().HasForeignKey(x => x.FormulaId).OnDelete(DeleteBehavior.Cascade);
+        b.Entity<Formula>().HasOne(x => x.Mirror).WithMany().HasForeignKey(x => x.MaterialId).OnDelete(DeleteBehavior.Restrict);
         b.Entity<Document>().HasMany(x => x.Links).WithOne().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
         b.Entity<DocumentLink>().HasIndex(x => new { x.EntityType, x.EntityId });
         b.Entity<Photo>().HasMany(x => x.Tags).WithOne().HasForeignKey(x => x.PhotoId).OnDelete(DeleteBehavior.Cascade);

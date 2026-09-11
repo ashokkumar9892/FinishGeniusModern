@@ -221,15 +221,19 @@ public class FormulaWorkspaceController(AppDbContext db, CurrentUser me, AuditSe
     public async Task<IActionResult> Recalc(int id, [FromBody] RecalcRequest req)
     {
         var f = await LoadAsync(id);
+        if (!FormulaRules.CanCalcBatch(me))
+            throw new ApiException(StatusCodes.Status403Forbidden, "Calc Batch is only available to System Administrators, FG Pro and FG Pro Plus users.");
+        FormulaRules.EnsureCanChangeIngredients(me, f);
         if (f.Ingredients.Any(i => i.DispensedGrams > 0)) throw ApiException.Bad(DispensedFirst);
         var row = f.Ingredients.FirstOrDefault(i => i.Id == req.IngredientId) ?? throw ApiException.NotFound("Ingredient");
         if (row.Material!.MaterialType != MaterialType.Base) throw ApiException.Bad("Calc Batch is only available for Base materials.");
         if (req.Grams <= 0 || req.Grams > 100_000_000) throw ApiException.Bad("Please enter a valid recalc amount in grams!");
         if (row.Grams <= 0) throw ApiException.Bad("This material has no grams to recalculate from.");
         if (row.Material.Density <= 0) throw ApiException.Bad("No density for material");
-        if (row.BatchNumber != null)
+        var batch = row.BatchNumber ?? InventoryBatches.Chosen((await InventoryBatches.ForMaterialsAsync(db, [row.MaterialId])).GetValueOrDefault(row.MaterialId), null)?.BatchNumber;
+        if (batch != null)
         {
-            var onHand = await InventoryBatches.OnHandAsync(db, row.MaterialId, row.BatchNumber);
+            var onHand = await InventoryBatches.OnHandAsync(db, row.MaterialId, batch);
             if (FormulaCalc.Gallons(req.Grams, row.Material.Density) > onHand) throw ApiException.Bad("Not enough material in the batches");
         }
 
@@ -256,6 +260,7 @@ public class FormulaWorkspaceController(AppDbContext db, CurrentUser me, AuditSe
     public async Task<IActionResult> Reweigh(int id, [FromBody] ReweighRequest req)
     {
         var f = await LoadAsync(id);
+        FormulaRules.EnsureCanChangeIngredients(me, f);
         if (f.Ingredients.Any(i => i.DispensedGrams > 0)) throw ApiException.Bad(DispensedFirst);
         if (req.TotalGrams <= 0 || req.TotalGrams > 100_000_000) throw ApiException.Bad("No valid weight entered for batch");
         var total = f.Ingredients.Sum(i => i.Grams);
@@ -285,15 +290,15 @@ public class FormulaWorkspaceController(AppDbContext db, CurrentUser me, AuditSe
     // ------------------------------------------------------------------ record & reset
 
     /// <summary>
-    /// POST /api/formulas/{id}/record { locationId } — "Record &amp; Reset": the Total Dispensed of every ingredient with a batch is
-    /// deducted from inventory (gallons, at the selected location), then all dispense amounts are reset for the next batch.
+    /// POST /api/formulas/{id}/record { locationId } — "Record &amp; Reset" (legacy RecordColorFormula): for every ingredient with a
+    /// batch (the saved one, else the latest batch) the Amount to Dispense — or, when that is 0, the Total Dispensed — is deducted
+    /// from inventory (gallons, at the selected location); then every row is reset (nothing dispensed, nothing to dispense).
     /// </summary>
     [HttpPost("{id:int}/record")]
     public async Task<IActionResult> Record(int id, [FromBody] RecordRequest req)
     {
         var f = await LoadAsync(id);
-        var dispensed = f.Ingredients.Where(i => i.DispensedGrams > 0).OrderBy(i => i.Sequence).ToList();
-        if (dispensed.Count == 0) throw ApiException.Bad("No materials have Dispensed Amounts.");
+        if (!f.Ingredients.Any(i => i.DispensedGrams > 0)) throw ApiException.Bad("No materials have Dispensed Amounts.");
 
         var locations = await db.MaterialLocations.AsNoTracking()
             .Where(l => l.GroupId == f.GroupId && !l.IsDeleted && LocationTypes.Contains(l.MaterialType)).Select(l => new { l.Id, l.Name }).ToListAsync();
@@ -301,45 +306,55 @@ public class FormulaWorkspaceController(AppDbContext db, CurrentUser me, AuditSe
             throw ApiException.Bad("Location is required when recording a dispense. Please select a location from the dropdown above!");
         if (req.LocationId != null && locations.All(l => l.Id != req.LocationId)) throw ApiException.Bad("The selected location no longer exists.");
 
-        var noBatch = dispensed.Where(i => string.IsNullOrEmpty(i.BatchNumber)).Select(i => i.Material!.ProductName).ToList();
+        var rows = f.Ingredients.OrderBy(i => i.Sequence).ToList();
+        var batches = await InventoryBatches.ForMaterialsAsync(db, rows.Select(i => i.MaterialId));
+        var noBatch = new List<string>();
         var shortOf = new List<string>();
-        var moves = new List<(FormulaIngredient Ingredient, decimal Gallons)>();
-        foreach (var i in dispensed.Where(i => !string.IsNullOrEmpty(i.BatchNumber)))
+        var moves = new List<(FormulaIngredient Ingredient, string Batch, decimal Grams, decimal Gallons)>();
+        foreach (var i in rows)
         {
-            var gallons = FormulaCalc.R(FormulaCalc.Gallons(i.DispensedGrams, i.Material!.Density), 4);
-            if (gallons <= 0) continue; // no density (or a trace amount): inventory cannot be updated for this material
-            var onHand = await InventoryBatches.OnHandAsync(db, i.MaterialId, i.BatchNumber!);
+            var batch = !string.IsNullOrEmpty(i.BatchNumber) ? i.BatchNumber : InventoryBatches.Chosen(batches.GetValueOrDefault(i.MaterialId), null)?.BatchNumber;
+            if (batch == null)
+            {
+                noBatch.Add(i.Material!.ProductName);
+                continue;
+            }
+            var grams = i.DispenseAmount > 0 ? i.DispenseAmount : i.DispensedGrams;
+            var gallons = FormulaCalc.R(FormulaCalc.Gallons(grams, i.Material!.Density), 4);
+            if (gallons <= 0) continue; // nothing to deduct, or no density: inventory cannot be updated for this material
+            var onHand = await InventoryBatches.OnHandAsync(db, i.MaterialId, batch);
             if (gallons > onHand) shortOf.Add(i.Material.ProductName);
-            else moves.Add((i, gallons));
+            else moves.Add((i, batch, grams, gallons));
         }
         if (shortOf.Count > 0)
             throw ApiException.Bad($"Please verify you have enough material in batches to complete this operation!\nMaterial(s): {string.Join(", ", shortOf)}");
 
         var location = locations.FirstOrDefault(l => l.Id == req.LocationId)?.Name;
-        foreach (var (i, gallons) in moves)
+        foreach (var (i, batch, grams, gallons) in moves)
         {
             db.InventoryTransactions.Add(new InventoryTransaction
             {
-                GroupId = f.GroupId, MaterialId = i.MaterialId, LocationId = req.LocationId, BatchNumber = i.BatchNumber, Quantity = -gallons,
+                GroupId = f.GroupId, MaterialId = i.MaterialId, LocationId = req.LocationId, BatchNumber = batch, Quantity = -gallons,
                 Reason = $"Dispensed: formula #{f.Id} {f.Name}".Length > 400 ? $"Dispensed: formula #{f.Id}" : $"Dispensed: formula #{f.Id} {f.Name}",
                 CustomerName = f.CustomerName, FormulaId = f.Id, CreatedBy = me.Id,
             });
             audit.Log(LinkEntityTypes.Material, i.MaterialId, "Inventory adjusted",
-                $"-{gallons.ToString("0.####", CultureInfo.InvariantCulture)} gal ({G(i.DispensedGrams)} g) dispensed for formula #{f.Id} {f.Name}\nBatch: {i.BatchNumber}"
+                $"-{gallons.ToString("0.####", CultureInfo.InvariantCulture)} gal ({G(grams)} g) dispensed for formula #{f.Id} {f.Name}\nBatch: {batch}"
                 + (location == null ? "" : $"\nLocation: {location}"), f.GroupId);
         }
 
+        var recorded = moves.ToDictionary(m => m.Ingredient.Id);
         FormulaHistory.Add(db, me, f.Id, f.GroupId, "Record and Reset",
-            "Record and Reset Pressed\n" + string.Join("\n", dispensed.Select(i =>
+            "Record and Reset Pressed\n" + string.Join("\n", rows.Select(i =>
                 $"Product type {MaterialTypes.Label(i.Material!.MaterialType)} Product Name {i.Material.ProductName} Product Code {i.Material.ProductCode} Dispensed amount {G(i.DispensedGrams)}"
-                + (string.IsNullOrEmpty(i.BatchNumber) ? " (no batch)" : $" batch {i.BatchNumber}"))));
+                + (recorded.TryGetValue(i.Id, out var mv) ? $" recorded {G(mv.Grams)} g from batch {mv.Batch}" : " (not recorded)"))));
 
-        // Reset for the next batch: nothing dispensed, the full formula is the amount to dispense again.
+        // Legacy reset: nothing dispensed and nothing left to dispense.
         foreach (var i in f.Ingredients)
         {
             i.IsDispensed = false;
             i.DispensedGrams = 0;
-            i.DispenseAmount = i.Grams;
+            i.DispenseAmount = 0;
         }
         db.FormulaDispenseSnapshots.RemoveRange(await db.FormulaDispenseSnapshots.Where(s => s.FormulaId == f.Id).ToListAsync());
         await db.SaveChangesAsync();
@@ -386,8 +401,9 @@ public class FormulaWorkspaceController(AppDbContext db, CurrentUser me, AuditSe
             var m = i.Material!;
             var label = $"{m.ProductName} ({m.ProductCode})";
             if (!batches.TryGetValue(i.MaterialId, out var list) || list.Count == 0) throw ApiException.Bad($"No Inventory Setup for {label}");
-            var batch = i.BatchNumber != null ? list.FirstOrDefault(b => b.BatchNumber == i.BatchNumber) : list.Count == 1 ? list[0] : null;
-            if (batch == null) throw ApiException.Bad(i.BatchNumber == null ? "Please select batch name." : $"Not Enough Material for {label}");
+            // The saved batch, otherwise the latest batch (legacy default).
+            var batch = InventoryBatches.Chosen(list, i.BatchNumber);
+            if (batch == null) throw ApiException.Bad($"Not Enough Material for {label}");
             var gallons = FormulaCalc.Gallons(i.DispenseAmount, m.Density);
             if ((m.MinQuantity > 0 && batch.OnHand < m.MinQuantity) || gallons > batch.OnHand) throw ApiException.Bad($"Not Enough Material for {label}");
             var can = device.Canisters.FirstOrDefault(c => c.MaterialId == i.MaterialId);

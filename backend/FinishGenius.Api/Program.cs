@@ -21,6 +21,17 @@ builder.Services.AddDbContext<AppDbContext>((sp, o) => o.UseSqlServer(sp.GetRequ
     sql.EnableRetryOnFailure(3);
     sql.CommandTimeout(60);
 }));
+// A legacy database (Prod) is used as-is: the same entities mapped onto the old site's dbo tables (Data/LegacyModel.cs).
+builder.Services.AddScoped<AppDbContext>(sp =>
+{
+    var options = sp.GetRequiredService<DbContextOptions<AppDbContext>>();
+    var target = sp.GetRequiredService<DatabaseSelector>().Current;
+    if (!target.Legacy) return new AppDbContext(options);
+    var http = sp.GetRequiredService<IHttpContextAccessor>();
+    return new LegacyAppDbContext(options,
+        () => int.TryParse(http.HttpContext?.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : 0,
+        target.Label);
+});
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 var jwt = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
@@ -85,6 +96,8 @@ if (args.Length > 0 && args[0].ToLowerInvariant() is "import-legacy" or "migrate
     var target = dbKey == null ? databases.Default : databases.Find(dbKey)
         ?? throw new InvalidOperationException($"Unknown database '{dbKey}'. Configured: {string.Join(", ", databases.All.Select(d => d.Key))}.");
     Console.WriteLine($"Database: {target.Key} ({target.Label})");
+    if (target.Legacy)
+        throw new InvalidOperationException($"'{target.Key}' is a legacy database shared with the old site; '{args[0]}' never runs against it.");
     using var cliScope = app.Services.CreateScope();
     cliScope.ServiceProvider.GetRequiredService<DatabaseSelector>().Use(target);
     var cliDb = cliScope.ServiceProvider.GetRequiredService<AppDbContext>();

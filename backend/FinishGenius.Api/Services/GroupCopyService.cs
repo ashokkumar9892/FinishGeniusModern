@@ -31,6 +31,7 @@ public class GroupCopyService(AppDbContext db, FileStorage files, CurrentUser me
     private readonly Dictionary<(int dest, int srcMaterial), int> _materialMap = new();
     private readonly Dictionary<(int dest, int srcStep), int> _stepMap = new();
     private readonly Dictionary<(int dest, int srcDepartment), int> _departmentMap = new();
+    private readonly Dictionary<(int dest, int srcDocument), int> _documentMap = new();
 
     public async Task<Dictionary<string, int>> CountsAsync(int groupId) => new()
     {
@@ -131,8 +132,11 @@ public class GroupCopyService(AppDbContext db, FileStorage files, CurrentUser me
 
     public async Task<int> CopyMaterialsAsync(List<int> ids, int destGroup)
     {
+        // Formula mirrors travel with their formula (CopyFormulasAsync / MapMaterialAsync), never as loose materials.
+        var mirrors = (await db.Formulas.AsNoTracking().Where(f => f.MaterialId != null && ids.Contains(f.MaterialId.Value))
+            .Select(f => f.MaterialId!.Value).ToListAsync()).ToHashSet();
         var count = 0;
-        foreach (var id in ids)
+        foreach (var id in ids.Where(i => !mirrors.Contains(i)))
         {
             await MapMaterialAsync(id, destGroup, forceNew: true);
             count++;
@@ -140,11 +144,21 @@ public class GroupCopyService(AppDbContext db, FileStorage files, CurrentUser me
         return count;
     }
 
+    /// <summary>The material of <paramref name="destGroup"/> that corresponds to a material of another group (matched by name, created when missing).</summary>
+    public Task<int> MapMaterialToGroupAsync(int srcMaterialId, int destGroup) => MapMaterialAsync(srcMaterialId, destGroup);
+
     private async Task<int> MapMaterialAsync(int srcMaterialId, int destGroup, bool forceNew = false)
     {
         if (_materialMap.TryGetValue((destGroup, srcMaterialId), out var id)) return id;
         var src = await db.Materials.AsNoTracking().FirstAsync(m => m.Id == srcMaterialId);
         if (src.GroupId == destGroup && !forceNew) return src.Id;
+
+        // A formula's mirror maps to the same formula in the destination group (matched by number, copied when missing).
+        if (src.MaterialType == MaterialType.Formula)
+        {
+            var formula = await db.Formulas.AsNoTracking().FirstOrDefaultAsync(f => f.MaterialId == src.Id);
+            if (formula != null) return _materialMap[(destGroup, srcMaterialId)] = await MapFormulaMirrorAsync(formula, destGroup);
+        }
 
         if (!forceNew)
         {
@@ -179,28 +193,79 @@ public class GroupCopyService(AppDbContext db, FileStorage files, CurrentUser me
 
     // ---------- Formulas ----------
 
+    /// <summary>
+    /// Copies formulas (with their mirror material and linked documents — documents of another group are copied into
+    /// <paramref name="destGroup"/>, documents of the same group are simply linked).
+    /// </summary>
     public async Task<int> CopyFormulasAsync(List<int> ids, int destGroup)
     {
         var src = await db.Formulas.AsNoTracking().Include(f => f.Ingredients).Where(f => ids.Contains(f.Id)).ToListAsync();
         foreach (var f in src)
-        {
-            var copy = new Formula
-            {
-                GroupId = destGroup, CategoryId = f.CategoryId == null ? null : await MapCategoryAsync(f.CategoryId.Value, destGroup),
-                Name = f.Name, Number = f.Number, CustomerName = f.CustomerName, IsComplete = f.IsComplete, BatchSize = f.BatchSize,
-                BatchType = f.BatchType, BatchValue = f.BatchValue, EmployeeName = f.EmployeeName, PurchaseOrderNumber = f.PurchaseOrderNumber,
-                MixedOn = DateTime.UtcNow,
-                ContainerType = f.ContainerType, ContainerPrice = f.ContainerPrice, MarkUp = f.MarkUp, Substrate = f.Substrate, Notes = f.Notes,
-                SpinDeltaL = f.SpinDeltaL, SpinDeltaA = f.SpinDeltaA, SpinDeltaB = f.SpinDeltaB, SpinDeltaE = f.SpinDeltaE,
-                SpexDeltaL = f.SpexDeltaL, SpexDeltaA = f.SpexDeltaA, SpexDeltaB = f.SpexDeltaB, SpexDeltaE = f.SpexDeltaE,
-                CreatedBy = me.Id,
-            };
-            foreach (var i in f.Ingredients)
-                copy.Ingredients.Add(new FormulaIngredient { MaterialId = await MapMaterialAsync(i.MaterialId, destGroup), Grams = i.Grams, DispenseAmount = i.Grams, Sequence = i.Sequence });
-            db.Formulas.Add(copy);
-        }
-        await db.SaveChangesAsync();
+            await CopyFormulaAsync(f, destGroup);
         return src.Count;
+    }
+
+    private async Task<Formula> CopyFormulaAsync(Formula f, int destGroup)
+    {
+        var copy = new Formula
+        {
+            GroupId = destGroup, CategoryId = f.CategoryId == null ? null : await MapCategoryAsync(f.CategoryId.Value, destGroup),
+            Name = f.Name, Number = f.Number, CustomerName = f.CustomerName, IsComplete = f.IsComplete, BatchSize = f.BatchSize,
+            BatchType = f.BatchType, BatchValue = f.BatchValue, EmployeeName = f.EmployeeName, PurchaseOrderNumber = f.PurchaseOrderNumber,
+            MixedOn = DateTime.UtcNow,
+            ContainerType = f.ContainerType, ContainerPrice = f.ContainerPrice, MarkUp = f.MarkUp, Substrate = f.Substrate, Notes = f.Notes,
+            SpinDeltaL = f.SpinDeltaL, SpinDeltaA = f.SpinDeltaA, SpinDeltaB = f.SpinDeltaB, SpinDeltaE = f.SpinDeltaE,
+            SpexDeltaL = f.SpexDeltaL, SpexDeltaA = f.SpexDeltaA, SpexDeltaB = f.SpexDeltaB, SpexDeltaE = f.SpexDeltaE,
+            CreatedBy = me.Id == 0 ? null : me.Id,
+        };
+        foreach (var i in f.Ingredients.OrderBy(i => i.Sequence))
+            copy.Ingredients.Add(new FormulaIngredient { MaterialId = await MapMaterialAsync(i.MaterialId, destGroup), Grams = i.Grams, DispenseAmount = i.Grams, Sequence = i.Sequence });
+        await FormulaMirror.SyncAsync(db, copy);
+        db.Formulas.Add(copy);
+        await db.SaveChangesAsync();
+        if (f.MaterialId is { } srcMirror && copy.MaterialId is { } destMirror) _materialMap[(destGroup, srcMirror)] = destMirror;
+
+        var docIds = await db.DocumentLinks.AsNoTracking().Where(l => l.EntityType == LinkEntityTypes.Formula && l.EntityId == f.Id)
+            .Select(l => l.DocumentId).Distinct().ToListAsync();
+        foreach (var docId in docIds)
+            db.DocumentLinks.Add(new DocumentLink { DocumentId = await MapDocumentAsync(docId, destGroup), EntityType = LinkEntityTypes.Formula, EntityId = copy.Id });
+        if (docIds.Count > 0) await db.SaveChangesAsync();
+        return copy;
+    }
+
+    /// <summary>Mirror material of the formula matching <paramref name="src"/> in <paramref name="destGroup"/> (same number), copying the formula when missing.</summary>
+    private async Task<int> MapFormulaMirrorAsync(Formula src, int destGroup)
+    {
+        var number = src.Number?.Trim();
+        var match = number == null ? null : await db.Formulas.Include(f => f.Ingredients)
+            .FirstOrDefaultAsync(f => f.GroupId == destGroup && !f.IsDeleted && f.Number != null && f.Number.Trim() == number);
+        if (match == null)
+        {
+            var full = await db.Formulas.AsNoTracking().Include(f => f.Ingredients).FirstAsync(f => f.Id == src.Id);
+            match = await CopyFormulaAsync(full, destGroup);
+        }
+        else if (match.MaterialId == null)
+        {
+            await FormulaMirror.SyncAsync(db, match);
+            await db.SaveChangesAsync();
+        }
+        return match.MaterialId!.Value;
+    }
+
+    /// <summary>The document of <paramref name="destGroup"/> that corresponds to <paramref name="srcDocumentId"/> (copied with its file once per run).</summary>
+    public async Task<int> MapDocumentAsync(int srcDocumentId, int destGroup)
+    {
+        if (_documentMap.TryGetValue((destGroup, srcDocumentId), out var id)) return id;
+        var d = await db.Documents.AsNoTracking().FirstAsync(x => x.Id == srcDocumentId);
+        if (d.GroupId == destGroup) return _documentMap[(destGroup, srcDocumentId)] = d.Id;
+        var copy = new Document
+        {
+            GroupId = destGroup, Name = d.Name, FileName = d.FileName, ContentType = d.ContentType, FileSize = d.FileSize, CreatedBy = me.Id == 0 ? null : me.Id,
+            StoredFile = d.StoredFile == null ? null : await files.CopyAsync(d.StoredFile, $"documents/{destGroup}"),
+        };
+        db.Documents.Add(copy);
+        await db.SaveChangesAsync();
+        return _documentMap[(destGroup, srcDocumentId)] = copy.Id;
     }
 
     // ---------- Process steps / schedules ----------
@@ -381,16 +446,10 @@ public class GroupCopyService(AppDbContext db, FileStorage files, CurrentUser me
 
     private async Task<int> CopyDocumentsAsync(int sourceGroup, int destGroup)
     {
-        var src = await db.Documents.AsNoTracking().Where(d => d.GroupId == sourceGroup).ToListAsync();
-        foreach (var d in src)
-        {
-            db.Documents.Add(new Document
-            {
-                GroupId = destGroup, Name = d.Name, FileName = d.FileName, ContentType = d.ContentType, FileSize = d.FileSize, CreatedBy = me.Id,
-                StoredFile = d.StoredFile == null ? null : await files.CopyAsync(d.StoredFile, $"documents/{destGroup}"),
-            });
-        }
-        await db.SaveChangesAsync();
+        // Documents already copied with their formulas are reused, so nothing is duplicated.
+        var src = await db.Documents.AsNoTracking().Where(d => d.GroupId == sourceGroup).Select(d => d.Id).ToListAsync();
+        foreach (var id in src)
+            await MapDocumentAsync(id, destGroup);
         return src.Count;
     }
 }

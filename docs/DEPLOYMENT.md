@@ -71,7 +71,7 @@ Browse to `http://<VM external IP>/` and sign in (`admin` / the `Seed:AdminPassw
   "Databases": {
     "Dev":  { "Label": "Development", "AutoMigrate": true,
               "ConnectionString": "Server=34.74.178.204;Database=FGAPP_21_May_2024;User Id=FGAPP;Password=***;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15" },
-    "Prod": { "Label": "Production", "AutoMigrate": false, "Production": true,
+    "Prod": { "Label": "Production", "AutoMigrate": false, "Production": true, "Legacy": true,
               "ConnectionString": "Server=35.196.141.157;Database=FGAPP02232023_FULL_03012023_030118;User Id=FGAPP;Password=***;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15" }
   },
   "Jwt": { "Key": "<long random secret, 32+ chars — keep the same value across servers/restarts>" },
@@ -84,7 +84,8 @@ Browse to `http://<VM external IP>/` and sign in (`admin` / the `Seed:AdminPassw
 | Setting | Meaning |
 |---|---|
 | `Databases:<Key>` | Databases offered on the sign-in page (only shown when there are 2+). `Label` is what users see, `Production: true` adds the live-data warning and an amber header badge. A lone `ConnectionStrings:Default` still works (one "Dev" database). |
-| `Databases:<Key>:AutoMigrate` | Create/update that database's `fg` schema on startup (default = `Database:AutoMigrate`). Prod is `false`: prepare it once with `dotnet FinishGenius.Api.dll migrate --db Prod`. |
+| `Databases:<Key>:AutoMigrate` | Create/update that database's `fg` schema on startup (default = `Database:AutoMigrate`; always off for `Legacy` databases). |
+| `Databases:<Key>:Legacy` | `true` = use the old Finish Genius database as-is: the app reads and writes the old `dbo` tables directly (shared with the old site, which keeps working; passwords are stored as bcrypt so both sites accept them). It never creates `fg` tables and is never migrated. Screens not connected to the old tables yet show a message. Mapping: `Data/LegacyModel.cs`. Prod is configured this way. |
 | `Database:Default` | Database used when none is chosen (and by the command-line tools without `--db`). |
 | `Database:AutoMigrate` | `true` = the app creates/updates the `fg` schema on startup. Set `false` if a DBA runs `FinishGenius_schema.sql` (idempotent) instead. |
 | `Database:SeedDemoData` | Default `false`. `true` creates an "AWFI Demo Group" with sample data (for a brand-new, empty database). |
@@ -94,6 +95,24 @@ Browse to `http://<VM external IP>/` and sign in (`admin` / the `Seed:AdminPassw
 A different database: change `Database=` in the connection string — the schema is created automatically (the SQL login
 needs `db_owner`, or `db_ddladmin` + read/write for migrations).
 
+### Production (legacy database) — what differs
+
+Production is the old site's database used as-is (`"Legacy": true`, mapping in `Data/LegacyModel*.cs`):
+
+- Connected so far: sign-in, groups, users, profile, DPM Center, material categories, departments, vendors, locations,
+  Equipment & Materials (list, inventory, reorder / purchase orders, order history), environmental report, bulk
+  import, formulas (list and editor), and the documents library.
+- Stock uses the old batches: `MaterialBatches.BatchQty` is the on-hand quantity and `MaterialQuantityChanges` the
+  history, written exactly like the old site (add to a batch = new quantity + change row; new batch = quantity only).
+- A formula is its own material row (`dbo.Materials`, Discriminator `Formulation`); no separate "mirror" row is made.
+- Ingredients keep the order they were added in (the old tables have no ordering column).
+- Sending jobs to dispense machines, scales and label printers, and changing purge settings, are refused with a
+  message: those devices are connected to the old site.
+- Old document files live on the old server; copy `AppData/Documents/{group}/` to
+  `<Storage:Root>/documents/{group}/legacy/` to preview them here. Files uploaded here are stored by this app, so the
+  old site cannot open them.
+- Old data contains a few corrupt quantities (up to 10^28 gallons); values that do not fit are shown as 0.
+
 ### Pointing at a different database / importing legacy data
 
 - To use another database, change `ConnectionStrings:Default` in `appsettings.Local.json` and recycle the app pool —
@@ -101,9 +120,8 @@ needs `db_owner`, or `db_ddladmin` + read/write for migrations).
 - To (re)load the real data from the legacy `FGAPP` database on the same SQL Server, run from the site folder:
   `dotnet FinishGenius.Api.dll import-legacy --source FGAPP --yes` (stop the site first; this replaces all `fg` data).
   See [LEGACY_IMPORT.md](LEGACY_IMPORT.md), including where to copy legacy document/photo files.
-- Both commands accept `--db <Key>` to work on another configured database, e.g. setting up Production:
-  `dotnet FinishGenius.Api.dll migrate --db Prod`, then
-  `dotnet FinishGenius.Api.dll import-legacy --db Prod --source FGAPP02232023_FULL_03012023_030118 --yes`.
+- Both commands accept `--db <Key>` to work on another configured database. They write to it, so don't run them
+  against a `Legacy` database (Production) unless you have decided to give it its own `fg` tables.
 
 ## 5. HTTPS (recommended)
 

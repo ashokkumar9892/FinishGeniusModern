@@ -17,7 +17,7 @@ namespace FinishGenius.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/users")]
-public partial class UsersController(AppDbContext db, CurrentUser me, AuditService audit) : ControllerBase
+public partial class UsersController(AppDbContext db, CurrentUser me, AuditService audit, DatabaseSelector database) : ControllerBase
 {
     public class UserRequest
     {
@@ -87,7 +87,7 @@ public partial class UsersController(AppDbContext db, CurrentUser me, AuditServi
         var (roles, extra) = await ValidateAsync(req, null);
         Passwords.Validate(req.Password);
         Apply(user, req);
-        user.PasswordHash = Passwords.Hash(req.Password!);
+        user.PasswordHash = Passwords.Hash(req.Password!, database.Current.Legacy);
         user.Roles = roles.Select(r => new UserRole { Role = r }).ToList();
         user.ExtraGroups = extra.Select(g => new UserGroup { GroupId = g }).ToList();
         db.Users.Add(user);
@@ -142,11 +142,12 @@ public partial class UsersController(AppDbContext db, CurrentUser me, AuditServi
         if (!string.IsNullOrEmpty(req.Password))
         {
             Passwords.Validate(req.Password);
-            user.PasswordHash = Passwords.Hash(req.Password);
+            user.PasswordHash = Passwords.Hash(req.Password, database.Current.Legacy);
             changes.Add("Password changed");
         }
 
-        user.Roles.RemoveAll(r => !roles.Contains(r.Role));
+        // Roles this app does not manage (e.g. the old site's ITSupport) are kept.
+        user.Roles.RemoveAll(r => Roles.All.Contains(r.Role) && !roles.Contains(r.Role));
         foreach (var r in roles.Where(r => user.Roles.All(x => x.Role != r)))
             user.Roles.Add(new UserRole { Role = r });
         user.ExtraGroups.RemoveAll(x => !extra.Contains(x.GroupId));
@@ -179,7 +180,7 @@ public partial class UsersController(AppDbContext db, CurrentUser me, AuditServi
     {
         var user = await LoadManageableAsync(id);
         Passwords.Validate(req.Password);
-        user.PasswordHash = Passwords.Hash(req.Password!);
+        user.PasswordHash = Passwords.Hash(req.Password!, database.Current.Legacy);
         audit.Log("User", user.Id, "Password reset", null, user.GroupId);
         await db.SaveChangesAsync();
         return Ok(new { message = $"Password reset for {user.Username}." });
@@ -191,6 +192,14 @@ public partial class UsersController(AppDbContext db, CurrentUser me, AuditServi
     {
         var user = await LoadManageableAsync(id);
         if (user.Id == me.Id) throw ApiException.Bad("You cannot delete your own account.");
+        if (database.Current.Legacy)
+        {
+            // The old site has no user delete, so the account is disabled instead.
+            user.Disabled = true;
+            audit.Log("User", user.Id, "Disabled", $"Delete requested: the {database.Current.Label} database keeps users, so the account was disabled", user.GroupId);
+            await db.SaveChangesAsync();
+            return Ok(new { message = "User disabled. This database keeps user accounts, so the account was disabled instead of deleted." });
+        }
         user.IsDeleted = true;
         audit.Log("User", user.Id, "Deleted", $"Username: {user.Username}; Email: {user.Email}", user.GroupId);
         await db.SaveChangesAsync();

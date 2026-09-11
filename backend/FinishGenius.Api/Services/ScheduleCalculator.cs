@@ -202,15 +202,23 @@ public class ScheduleCalculator(AppDbContext db)
         return new QuantityResult(sqft, Math.Round(sqft * hoursPerSqFt, 2), lines, materialCostPerSqFt, hoursPerSqFt, otherPerSqFt);
     }
 
-    /// <summary>Formula → its ingredients' gallons in one batch.</summary>
+    /// <summary>
+    /// Formula mirror material id → the formula's ingredients' gallons in one batch. The mirror is linked by
+    /// <see cref="Formula.MaterialId"/> (imported formulas: mirror id == formula id, backfilled by the FormulaMaterialLink migration).
+    /// </summary>
     private async Task<Dictionary<int, List<(int materialId, decimal gallons)>>> LoadRecipesAsync(List<int> ids)
     {
         if (ids.Count == 0) return new();
+        var formulas = await db.Formulas.AsNoTracking().Where(f => f.MaterialId != null && ids.Contains(f.MaterialId.Value))
+            .Select(f => new { f.Id, Mirror = f.MaterialId!.Value }).ToListAsync();
+        if (formulas.Count == 0) return new();
+        var mirrorOf = formulas.ToDictionary(f => f.Id, f => f.Mirror);
+        var formulaIds = mirrorOf.Keys.ToList();
         var rows = await db.FormulaIngredients.AsNoTracking()
-            .Where(i => ids.Contains(i.FormulaId) && i.Grams > 0)
+            .Where(i => formulaIds.Contains(i.FormulaId) && i.Grams > 0)
             .Select(i => new { i.FormulaId, i.MaterialId, i.Grams, Density = i.Material!.Density })
             .ToListAsync();
-        return rows.Where(r => r.Density > 0).GroupBy(r => r.FormulaId)
+        return rows.Where(r => r.Density > 0).GroupBy(r => mirrorOf[r.FormulaId])
             .ToDictionary(g => g.Key, g => g.Select(r => (r.MaterialId, GramsToGallons(r.Grams, r.Density))).ToList());
     }
 

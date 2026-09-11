@@ -62,9 +62,19 @@ public class FormulasController(AppDbContext db, CurrentUser me, AuditService au
         public decimal? SpexDeltaB { get; set; }
         public decimal? SpexDeltaE { get; set; }
         public List<IngredientInput>? Ingredients { get; set; }
+        /// <summary>
+        /// Batch-size rescale (legacy): rows whose grams changed get Amount to Dispense = their new grams instead of the difference.
+        /// Only allowed on Complete formulas with nothing dispensed.
+        /// </summary>
+        public bool ResetDispenseAmounts { get; set; }
     }
 
+    public const string DispensedFirst = "Please Record & Reset or revert your dispense operation.";
+    public const string CompleteFirst = "Please complete 2 step formula save operation before modifying batch size/type.";
+
     public record CopyRequest(string? NewName, string? NewNumber);
+    public record MoveGroupRequest(int GroupId);
+    private record Usage(List<(int Id, string Name)> Steps, List<(int Id, string Name, string Number)> Schedules);
     public record BulkCopyRequest(List<int>? Ids, int DestinationGroupId);
     private record IngredientChange(string Action, string Description, string? Old, string? New);
 
@@ -86,7 +96,8 @@ public class FormulasController(AppDbContext db, CurrentUser me, AuditService au
         if (!string.IsNullOrWhiteSpace(search))
         {
             var s = search.Trim();
-            q = q.Where(f => f.Name.Contains(s) || (f.Number != null && f.Number.Contains(s)) || (f.CustomerName != null && f.CustomerName.Contains(s)));
+            q = q.Where(f => f.Name.Contains(s) || (f.Number != null && f.Number.Contains(s)) || (f.CustomerName != null && f.CustomerName.Contains(s))
+                             || (f.Category != null && f.Category.Name.Contains(s)));
         }
 
         var rows = await q.OrderByDescending(f => f.Id).Select(f => new
@@ -152,7 +163,7 @@ public class FormulasController(AppDbContext db, CurrentUser me, AuditService au
             f.Name, f.Number, f.CustomerName, f.IsComplete, f.BatchSize, BatchType = (int)f.BatchType, BatchTypeLabel = FormulaUnits.Label(f.BatchType),
             f.BatchValue, f.ContainerType, f.ContainerPrice, f.MarkUp, f.Substrate, f.Notes, f.EmployeeName, f.PurchaseOrderNumber, f.MixedOn,
             f.DispenserId, f.SpinDeltaL, f.SpinDeltaA, f.SpinDeltaB, f.SpinDeltaE, f.SpexDeltaL, f.SpexDeltaA, f.SpexDeltaB, f.SpexDeltaE,
-            f.CreatedAt, f.UpdatedAt,
+            f.CreatedAt, f.UpdatedAt, f.MaterialId,
             CreatedByName = createdBy == null ? null : Text.Clean($"{createdBy.FirstName} {createdBy.LastName}") ?? createdBy.Username,
             UsesBatches = await InventoryBatches.GroupUsesBatchesAsync(db, f.GroupId),
             HasUndoDispense = await db.FormulaDispenseSnapshots.AnyAsync(s => s.FormulaId == f.Id),
@@ -169,8 +180,11 @@ public class FormulasController(AppDbContext db, CurrentUser me, AuditService au
     {
         await me.EnsureGroupAsync(input.GroupId);
         var f = new Formula { GroupId = input.GroupId, CreatedBy = me.Id == 0 ? null : me.Id };
+        // New formulas default to the legacy "1 Gallon" container.
+        input.ContainerType ??= FormulaUnits.ContainerTypes[0];
         await ApplyAsync(f, input, isNew: true);
         f.MixedOn = DateTime.UtcNow;
+        await FormulaMirror.SyncAsync(db, f);
         db.Formulas.Add(f);
         await db.SaveChangesAsync();
 
@@ -191,9 +205,18 @@ public class FormulasController(AppDbContext db, CurrentUser me, AuditService au
         var f = await db.Formulas.Include(x => x.Ingredients).FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted)
             ?? throw ApiException.NotFound("Formula");
         await me.EnsureGroupAsync(f.GroupId);
-        var (changes, ingredientChanges) = await ApplyAsync(f, input, isNew: false);
+        if (IngredientsChanged(f, input.Ingredients)) FormulaRules.EnsureCanChangeIngredients(me, f);
+        if (f.IsComplete && !input.IsComplete && !me.IsAdmin)
+            throw new ApiException(StatusCodes.Status403Forbidden, "Only an administrator can mark a formula as Incomplete.");
+        if (input.ResetDispenseAmounts)
+        {
+            if (f.Ingredients.Any(i => i.DispensedGrams > 0)) throw ApiException.Bad(DispensedFirst);
+            if (!f.IsComplete) throw ApiException.Bad(CompleteFirst);
+        }
+        var (changes, ingredientChanges) = await ApplyAsync(f, input, isNew: false, input.ResetDispenseAmounts);
         f.UpdatedAt = DateTime.UtcNow;
         f.MixedOn = f.UpdatedAt; // legacy: every save stamps "Mixed On"
+        await FormulaMirror.SyncAsync(db, f);
         if (changes.Count > 0 || ingredientChanges.Count == 0)
             audit.Log(AuditType, f.Id, "Updated", changes.Count == 0 ? "No changes" : string.Join("\n", changes), f.GroupId);
         foreach (var c in ingredientChanges)
@@ -203,7 +226,15 @@ public class FormulasController(AppDbContext db, CurrentUser me, AuditService au
     }
 
     /// <summary>Validates <paramref name="input"/> and applies it to <paramref name="f"/>; returns readable change lists.</summary>
-    private async Task<(List<string> Header, List<IngredientChange> Ingredients)> ApplyAsync(Formula f, FormulaInput input, bool isNew)
+    /// <summary>True when the ingredient list (materials, grams or order) of <paramref name="input"/> differs from the saved one.</summary>
+    private static bool IngredientsChanged(Formula f, List<IngredientInput>? input)
+    {
+        var saved = f.Ingredients.OrderBy(i => i.Sequence).ThenBy(i => i.Id).Select(i => (i.MaterialId, i.Grams)).ToList();
+        var wanted = (input ?? []).Select((l, idx) => (l, seq: l.Sequence ?? idx + 1)).OrderBy(x => x.seq).Select(x => (x.l.MaterialId, x.l.Grams)).ToList();
+        return !saved.SequenceEqual(wanted);
+    }
+
+    private async Task<(List<string> Header, List<IngredientChange> Ingredients)> ApplyAsync(Formula f, FormulaInput input, bool isNew, bool resetDispense = false)
     {
         var changes = new List<string>();
         var ingredientChanges = new List<IngredientChange>();
@@ -241,9 +272,10 @@ public class FormulasController(AppDbContext db, CurrentUser me, AuditService au
             if (v is < -1000 or > 1000) errors.Add($"{label} must be between -1000 and 1000.");
         if (input.SpinDeltaE < 0 || input.SpexDeltaE < 0) errors.Add("ΔE cannot be negative.");
 
-        // Formula number: unique inside the group (legacy "Formula number already exists.").
+        // Formula number: unique among the group's formulas and material product codes (legacy IsCodeAvilable,
+        // "Formula number already exists.").
         if (number != null && (isNew || !string.Equals(number, f.Number?.Trim(), StringComparison.OrdinalIgnoreCase))
-            && await NumberTakenAsync(f.GroupId, number, f.Id))
+            && await NumberTakenAsync(f.GroupId, number, f.Id, f.MaterialId))
             errors.Add("Formula number already exists.");
 
         // Category: a Base, Formula or Product category (legacy: MaterialType in 1, 6, 7) of the same group or shared;
@@ -371,9 +403,10 @@ public class FormulasController(AppDbContext db, CurrentUser me, AuditService au
             }
             if (row.Grams != l.Grams)
             {
-                // Legacy: the added (or removed) grams are added to the Amount to Dispense.
-                ingredientChanges.Add(new(l.Grams > row.Grams ? "Material added" : "Material modified", Mat(l.MaterialId), G(row.Grams), G(l.Grams)));
-                row.DispenseAmount = Math.Max(0, row.DispenseAmount + (l.Grams - row.Grams));
+                // Legacy: the added (or removed) grams are added to the Amount to Dispense; a batch-size rescale sets it to the new grams.
+                ingredientChanges.Add(new(resetDispense ? "Batch size changed" : l.Grams > row.Grams ? "Material added" : "Material modified",
+                    Mat(l.MaterialId), G(row.Grams), G(l.Grams)));
+                row.DispenseAmount = resetDispense ? l.Grams : Math.Max(0, row.DispenseAmount + (l.Grams - row.Grams));
             }
             if (row.Sequence != seq) reordered = true;
             row.Grams = l.Grams;
@@ -393,30 +426,176 @@ public class FormulasController(AppDbContext db, CurrentUser me, AuditService au
         return (changes, ingredientChanges);
     }
 
-    private Task<bool> NumberTakenAsync(int groupId, string number, int exceptId) =>
-        db.Formulas.AnyAsync(x => x.GroupId == groupId && !x.IsDeleted && x.Id != exceptId && x.Number != null && x.Number.Trim() == number);
+    /// <summary>Formula number taken by another formula or by a material product code of the group (the formula's own mirror excluded).</summary>
+    private async Task<bool> NumberTakenAsync(int groupId, string number, int exceptFormulaId, int? exceptMaterialId) =>
+        await db.Formulas.AnyAsync(x => x.GroupId == groupId && !x.IsDeleted && x.Id != exceptFormulaId && x.Number != null && x.Number.Trim() == number)
+        || await db.Materials.AnyAsync(m => m.GroupId == groupId && !m.IsDeleted && m.ProductCode != null && m.ProductCode.Trim() == number
+                                            && (exceptMaterialId == null || m.Id != exceptMaterialId));
 
-    // ------------------------------------------------------------------ delete / copy
+    // ------------------------------------------------------------------ delete / copy / move
 
-    /// <summary>DELETE /api/formulas/{id} — soft delete (administrators).</summary>
+    /// <summary>Process steps (values picking the mirror material) and schedules (containing those steps or overriding a value with it).</summary>
+    private async Task<Usage> UsageAsync(Formula f)
+    {
+        if (db is LegacyAppDbContext) return await LegacyUsageAsync(f.Id);
+        if (f.MaterialId is not { } mid) return new([], []);
+        var key = mid.ToString(CultureInfo.InvariantCulture);
+        var stepIds = await db.ProcessStepValues.Where(v => v.MaterialId == mid)
+            .Join(db.ProcessStepEntries, v => v.EntryId, e => e.Id, (v, e) => e.ProcessStepId).Distinct().ToListAsync();
+        var steps = await db.ProcessSteps.AsNoTracking().Where(s => stepIds.Contains(s.Id) && !s.IsDeleted).OrderBy(s => s.Name)
+            .Select(s => new { s.Id, s.Name }).ToListAsync();
+        var overrideScheduleIds = await OverridesOf(key).Join(db.ProcessScheduleSteps, o => o.ScheduleStepId, s => s.Id, (o, s) => s.ScheduleId).Distinct().ToListAsync();
+        var liveStepIds = steps.Select(s => s.Id).ToList();
+        var stepScheduleIds = await db.ProcessScheduleSteps.Where(s => liveStepIds.Contains(s.ProcessStepId)).Select(s => s.ScheduleId).Distinct().ToListAsync();
+        var scheduleIds = overrideScheduleIds.Union(stepScheduleIds).ToList();
+        var schedules = await db.ProcessSchedules.AsNoTracking().Where(s => scheduleIds.Contains(s.Id) && !s.IsArchived).OrderBy(s => s.Name)
+            .Select(s => new { s.Id, s.Name, s.Number }).ToListAsync();
+        return new(steps.Select(s => (s.Id, s.Name)).ToList(), schedules.Select(s => (s.Id, s.Name, s.Number)).ToList());
+    }
+
+    private sealed class UsageRow
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? Number { get; set; }
+    }
+
+    /// <summary>
+    /// Legacy database (the formula is its own material): process steps whose values hold the formula id, and schedules
+    /// containing those steps or overriding a value with it.
+    /// </summary>
+    private async Task<Usage> LegacyUsageAsync(int formulaId)
+    {
+        const string uses = "(d.MaterialID = @id OR d.Value = @key)";
+        Microsoft.Data.SqlClient.SqlParameter[] Args() =>
+            [new("@id", formulaId), new("@key", formulaId.ToString(CultureInfo.InvariantCulture))];
+        var steps = await db.Database.SqlQueryRaw<UsageRow>($"""
+            SELECT fs.ID AS Id, ISNULL(NULLIF(LTRIM(RTRIM(fs.Description)), ''), CONCAT('Step #', fs.ID)) AS Name, CAST(NULL AS nvarchar(400)) AS Number
+            FROM dbo.FinishingSteps fs
+            WHERE ISNULL(fs.IsDeleted, 0) = 0 AND EXISTS (SELECT 1 FROM dbo.FinishingStepsDetails d WHERE d.StepID = fs.ID AND {uses})
+            ORDER BY Name
+            """, Args()).ToListAsync();
+        var schedules = await db.Database.SqlQueryRaw<UsageRow>($"""
+            SELECT sc.ID AS Id, ISNULL(NULLIF(LTRIM(RTRIM(sc.Name)), ''), CONCAT('Schedule ', sc.ID)) AS Name, ISNULL(LTRIM(RTRIM(sc.Number)), '') AS Number
+            FROM dbo.FinishingSchedules sc
+            WHERE EXISTS (SELECT 1 FROM dbo.FinishingSchedulesSteps st WHERE st.FinishingScheduleID = sc.ID AND (
+                      st.FinishingStepID IN (SELECT d.StepID FROM dbo.FinishingStepsDetails d JOIN dbo.FinishingSteps fs ON fs.ID = d.StepID
+                                             WHERE ISNULL(fs.IsDeleted, 0) = 0 AND {uses})
+                      OR EXISTS (SELECT 1 FROM dbo.FinishingSchedulesStepsValues v WHERE v.FinishingSchedulesStepID = st.ID AND v.Value = @key)))
+            ORDER BY Name
+            """, Args()).ToListAsync();
+        return new(steps.Select(s => (s.Id, s.Name)).ToList(), schedules.Select(s => (s.Id, s.Name, s.Number ?? "")).ToList());
+    }
+
+    /// <summary>Legacy DeleteById: step and schedule values that hold the deleted formula are removed.</summary>
+    private Task RemoveFromLegacyProcessesAsync(int formulaId) => db.Database.ExecuteSqlRawAsync("""
+        DELETE v FROM dbo.FinishingSchedulesStepsValues v
+        WHERE v.Value = @key OR v.FinishingStepsDetailID IN (SELECT d.ID FROM dbo.FinishingStepsDetails d WHERE d.Value = @key);
+        DELETE FROM dbo.FinishingStepsDetails WHERE Value = @key;
+        """, new Microsoft.Data.SqlClient.SqlParameter("@key", formulaId.ToString(CultureInfo.InvariantCulture)));
+
+    /// <summary>Schedule overrides that substitute the material <paramref name="materialKey"/> into a Material characteristic.</summary>
+    private IQueryable<ScheduleStepOverride> OverridesOf(string materialKey) =>
+        db.ScheduleStepOverrides.Where(o => o.Value == materialKey
+            && db.ProcessStepValues.Any(v => v.Id == o.ProcessStepValueId && v.Characteristic!.InputType == CharacteristicInputTypes.Material));
+
+    private static string UsageText(Usage u) =>
+        $"{u.Steps.Count} process step{(u.Steps.Count == 1 ? "" : "s")} and {u.Schedules.Count} process schedule{(u.Schedules.Count == 1 ? "" : "s")}";
+
+    /// <summary>GET /api/formulas/{id}/usage — process steps and schedules that use the formula (shown in the delete confirmation).</summary>
+    [HttpGet("{id:int}/usage")]
+    public async Task<IActionResult> GetUsage(int id)
+    {
+        var f = await db.Formulas.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted) ?? throw ApiException.NotFound("Formula");
+        await me.EnsureGroupAsync(f.GroupId);
+        var u = await UsageAsync(f);
+        return Ok(new
+        {
+            ProcessSteps = u.Steps.Select(s => new { s.Id, s.Name }),
+            ProcessSchedules = u.Schedules.Select(s => new { s.Id, s.Name, s.Number }),
+        });
+    }
+
+    /// <summary>
+    /// DELETE /api/formulas/{id} — soft delete (administrators). Like legacy DeleteById, process steps stop using the formula
+    /// (their material value is cleared) and schedule overrides that substitute it are removed; the mirror material is deleted too.
+    /// </summary>
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
         me.EnsureAdmin();
         var f = await db.Formulas.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted) ?? throw ApiException.NotFound("Formula");
         await me.EnsureGroupAsync(f.GroupId);
+        var usage = await UsageAsync(f);
+        var legacy = db is LegacyAppDbContext; // the formula row is its own material there
         f.IsDeleted = true;
         f.UpdatedAt = DateTime.UtcNow;
-        // Imported formulations also exist as materials (type Formula, same id) so process steps can pick them; they go too.
-        var mirror = await db.Materials.FirstOrDefaultAsync(m => m.Id == f.Id && m.GroupId == f.GroupId && m.MaterialType == MaterialType.Formula && !m.IsDeleted);
-        if (mirror != null)
+        if (!legacy && f.MaterialId is { } mid)
         {
-            mirror.IsDeleted = true;
-            mirror.UpdatedAt = f.UpdatedAt;
+            foreach (var v in await db.ProcessStepValues.Where(v => v.MaterialId == mid).ToListAsync()) v.MaterialId = null;
+            db.ScheduleStepOverrides.RemoveRange(await OverridesOf(mid.ToString(CultureInfo.InvariantCulture)).ToListAsync());
+            var mirror = await db.Materials.FirstOrDefaultAsync(m => m.Id == mid && !m.IsDeleted);
+            if (mirror != null)
+            {
+                mirror.IsDeleted = true;
+                mirror.UpdatedAt = f.UpdatedAt;
+            }
         }
-        audit.Log(AuditType, f.Id, "Deleted", $"Name: {f.Name}" + (f.Number == null ? "" : $" (#{f.Number})"), f.GroupId);
+        audit.Log(AuditType, f.Id, "Deleted", $"Name: {f.Name}" + (f.Number == null ? "" : $" (#{f.Number})")
+            + (usage.Steps.Count + usage.Schedules.Count == 0 ? "" : $"\nRemoved from {UsageText(usage)}"), f.GroupId);
         await db.SaveChangesAsync();
+        if (legacy) await RemoveFromLegacyProcessesAsync(f.Id);
         return Ok(new { message = "Formula deleted." });
+    }
+
+    /// <summary>
+    /// PUT /api/formulas/{id}/group { groupId } — administrators move a formula to another group: category, ingredients and
+    /// the mirror material are remapped by name (created when missing, like Bulk Copy), linked documents are copied along.
+    /// </summary>
+    [HttpPut("{id:int}/group")]
+    public async Task<IActionResult> MoveGroup(int id, [FromBody] MoveGroupRequest req)
+    {
+        me.EnsureAdmin();
+        var f = await db.Formulas.Include(x => x.Ingredients).FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted) ?? throw ApiException.NotFound("Formula");
+        await me.EnsureGroupAsync(f.GroupId);
+        if (req.GroupId == f.GroupId) throw ApiException.Bad("The formula already belongs to this group.");
+        await me.EnsureGroupAsync(req.GroupId);
+        var dest = await db.Groups.AsNoTracking().FirstOrDefaultAsync(g => g.Id == req.GroupId && !g.IsDeleted) ?? throw ApiException.NotFound("Group");
+        var srcName = await db.Groups.Where(g => g.Id == f.GroupId).Select(g => g.Name).FirstAsync();
+        var number = Text.Clean(f.Number);
+        if (number != null && await NumberTakenAsync(dest.Id, number, f.Id, f.MaterialId)) throw ApiException.Bad("Formula number already exists.");
+        var usage = await UsageAsync(f);
+        if (usage.Steps.Count + usage.Schedules.Count > 0)
+            throw ApiException.Bad($"This formula is used in {UsageText(usage)} of the {srcName} group. Remove it from them before moving it to another group.");
+
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await db.Database.BeginTransactionAsync();
+            var srcGroup = f.GroupId;
+            f.CategoryId = f.CategoryId == null ? null : await copier.MapCategoryAsync(f.CategoryId.Value, dest.Id);
+            foreach (var i in f.Ingredients)
+            {
+                var mapped = await copier.MapMaterialToGroupAsync(i.MaterialId, dest.Id);
+                if (mapped == i.MaterialId) continue;
+                i.MaterialId = mapped;
+                i.BatchNumber = null; // batches belong to the old group's material
+            }
+            if (f.Ingredients.GroupBy(i => i.MaterialId).Any(g => g.Count() > 1))
+                throw ApiException.Bad("Two ingredients match the same material of the destination group; the formula cannot be moved.");
+            f.GroupId = dest.Id;
+            f.DispenserId = null; // devices belong to the old group
+            f.UpdatedAt = DateTime.UtcNow;
+            db.FormulaDevicePreferences.RemoveRange(await db.FormulaDevicePreferences.Where(p => p.FormulaId == f.Id).ToListAsync());
+            var links = await db.DocumentLinks.Where(l => l.EntityType == LinkEntityTypes.Formula && l.EntityId == f.Id).ToListAsync();
+            foreach (var l in links) l.DocumentId = await copier.MapDocumentAsync(l.DocumentId, dest.Id);
+            await FormulaMirror.SyncAsync(db, f);
+            audit.Log(AuditType, f.Id, "Moved", $"Group: {srcName} → {dest.Name}" + (links.Count > 0 ? $"\n{links.Count} document(s) copied to the {dest.Name} group" : ""), dest.Id);
+            audit.Log(AuditType, f.Id, "Moved", $"Moved to the {dest.Name} group", srcGroup);
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
+        return Ok(new { message = $"Formula moved to the {dest.Name} group.", groupId = dest.Id });
     }
 
     /// <summary>POST /api/formulas/{id}/copy { newName, newNumber } — "Copy to New" inside the same group (documents stay linked).</summary>
@@ -433,7 +612,7 @@ public class FormulasController(AppDbContext db, CurrentUser me, AuditService au
         else if (newName.Length > 200) errors.Add("New Name must be 200 characters or fewer.");
         if (newNumber == null) errors.Add("New Number is required.");
         else if (newNumber.Length > 100) errors.Add("New Number must be 100 characters or fewer.");
-        else if (await NumberTakenAsync(src.GroupId, newNumber, 0)) errors.Add("Formula number already exists.");
+        else if (await NumberTakenAsync(src.GroupId, newNumber, 0, null)) errors.Add("Formula number already exists.");
         if (errors.Count > 0) throw ApiException.Bad(string.Join("\n", errors));
 
         var copy = new Formula
@@ -450,6 +629,7 @@ public class FormulasController(AppDbContext db, CurrentUser me, AuditService au
                 MaterialId = i.MaterialId, Grams = i.Grams, DispenseAmount = i.Grams, Sequence = i.Sequence, BatchNumber = i.BatchNumber,
             }).ToList(),
         };
+        await FormulaMirror.SyncAsync(db, copy);
         db.Formulas.Add(copy);
         await db.SaveChangesAsync();
 

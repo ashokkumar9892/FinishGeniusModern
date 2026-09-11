@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react'
 import clsx from 'clsx'
 import { EmptyState, LoadingBlock, SearchInput } from './ui'
@@ -44,6 +44,8 @@ export interface DataTableProps<T> {
   dense?: boolean
   /** Remove the card border (when embedding in another card/modal). */
   bare?: boolean
+  /** Remembers the current page in sessionStorage under this key (e.g. to come back to the same page from a detail screen). */
+  stateKey?: string
 }
 
 const hide = { sm: 'hidden sm:table-cell', md: 'hidden md:table-cell', lg: 'hidden lg:table-cell', xl: 'hidden xl:table-cell' }
@@ -62,11 +64,29 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const {
     rows, columns, rowKey, loading, searchPlaceholder, searchText, initialSort, pageSize = 50, selectable,
     selected = [], onSelectedChange, onRowClick, rowClassName, emptyTitle = 'No data available in table',
-    emptyDescription, emptyAction, toolbar, toolbarRight, dense, bare,
+    emptyDescription, emptyAction, toolbar, toolbarRight, dense, bare, stateKey,
   } = props
   const [q, setQ] = useState('')
   const [sort, setSort] = useState(initialSort)
-  const [page, setPage] = useState(0)
+  const pageStoreKey = stateKey ? `fg.table.${stateKey}.page` : null
+  const [page, setPage] = useState(() => {
+    if (!pageStoreKey) return 0
+    try {
+      return Math.max(0, Number(sessionStorage.getItem(pageStoreKey) ?? 0) || 0)
+    } catch {
+      return 0
+    }
+  })
+  // With a stateKey the first load of the rows keeps the remembered page; later search / row changes go back to page 1.
+  const rowsLoaded = useRef(!pageStoreKey)
+  useEffect(() => {
+    if (!pageStoreKey) return
+    try {
+      sessionStorage.setItem(pageStoreKey, String(page))
+    } catch {
+      /* storage unavailable */
+    }
+  }, [pageStoreKey, page])
   const search = (props.search ?? q).trim().toLowerCase()
 
   const filtered = useMemo(() => {
@@ -93,7 +113,13 @@ export function DataTable<T>(props: DataTableProps<T>) {
   }, [filtered, sort, columns])
 
   const pages = Math.max(1, Math.ceil(sorted.length / pageSize))
-  useEffect(() => setPage(0), [search, rows.length])
+  useEffect(() => {
+    if (!rowsLoaded.current) {
+      if (rows.length > 0) rowsLoaded.current = true
+      return
+    }
+    setPage(0)
+  }, [search, rows.length])
   const current = Math.min(page, pages - 1)
   const pageRows = sorted.slice(current * pageSize, current * pageSize + pageSize)
   const from = sorted.length === 0 ? 0 : current * pageSize + 1
