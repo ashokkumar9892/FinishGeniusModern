@@ -1,9 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
-import { Eye, EyeOff, LogIn } from 'lucide-react'
-import { errorMessage } from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
+import clsx from 'clsx'
+import { Database, Eye, EyeOff, LogIn } from 'lucide-react'
+import { api, databaseStore, errorMessage } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
-import { Checkbox, ErrorBanner, Field, Spinner } from '@/components/ui'
+import type { DatabaseRef } from '@/lib/types'
+import { Checkbox, ErrorBanner, Field, Note, Spinner } from '@/components/ui'
 import { Logo } from '@/components/Layout'
 
 export default function LoginPage() {
@@ -15,6 +18,15 @@ export default function LoginPage() {
   const [show, setShow] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [picked, setPicked] = useState(() => databaseStore.get())
+
+  const { data: dbOptions } = useQuery({
+    queryKey: ['auth-databases'],
+    queryFn: () => api.get<{ databases: DatabaseRef[]; default: string }>('/auth/databases').then((r) => r.data),
+    staleTime: Infinity,
+  })
+  const databases = dbOptions?.databases ?? []
+  const database = databases.find((d) => d.key === picked) ?? databases.find((d) => d.key === dbOptions?.default) ?? databases[0]
 
   if (me) return <Navigate to="/" replace />
 
@@ -27,7 +39,7 @@ export default function LoginPage() {
     setBusy(true)
     setError(null)
     try {
-      await login(username.trim(), password, remember)
+      await login(username.trim(), password, remember, database?.key)
       navigate('/', { replace: true })
     } catch (err) {
       setError(errorMessage(err))
@@ -67,6 +79,35 @@ export default function LoginPage() {
             <p className="text-sm text-muted-foreground mt-1">Welcome back to Finish Genius.</p>
           </div>
           <ErrorBanner message={error} />
+          {databases.length > 1 && (
+            <Field label="Database">
+              <div role="radiogroup" className="grid gap-2" style={{ gridTemplateColumns: `repeat(${databases.length}, minmax(0, 1fr))` }}>
+                {databases.map((d) => {
+                  const active = d.key === database?.key
+                  return (
+                    <button
+                      key={d.key}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setPicked(d.key)}
+                      className={clsx(
+                        'h-9 rounded-md border text-sm font-medium inline-flex items-center justify-center gap-1.5 transition-colors',
+                        !active && 'border-input bg-card text-muted-foreground hover:bg-muted',
+                        active && !d.production && 'border-primary bg-primary/10 text-primary',
+                        active && d.production && 'border-amber-500 bg-amber-500/15 text-amber-700 dark:text-amber-300',
+                      )}
+                    >
+                      <Database className="h-4 w-4" /> {d.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </Field>
+          )}
+          {databases.length > 1 && database?.production && (
+            <Note>You are signing in to the {database.label} database — changes affect live data.</Note>
+          )}
           <Field label="Username or email address">
             <input className="input" autoFocus autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="name@company.com" />
           </Field>

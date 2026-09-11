@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FinishGenius.Api.Data;
 using FinishGenius.Api.Domain;
+using Microsoft.Data.SqlClient;
 
 namespace FinishGenius.Api.Infrastructure;
 
@@ -32,11 +33,33 @@ public class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExceptionMi
         {
             await Write(ctx, ex.Status, ex.Message);
         }
+        catch (Exception ex) when (DatabaseProblem(ctx, ex) is { } message)
+        {
+            log.LogError(ex, "Database error on {Path}", ctx.Request.Path);
+            await Write(ctx, StatusCodes.Status503ServiceUnavailable, message);
+        }
         catch (Exception ex)
         {
             log.LogError(ex, "Unhandled error on {Path}", ctx.Request.Path);
             await Write(ctx, StatusCodes.Status500InternalServerError, "An unexpected error occurred. Please try again or contact support.");
         }
+    }
+
+    private static readonly int[] ConnectionErrors = [-2, 2, 53, 4060, 10053, 10054, 10060, 11001, 18456];
+
+    /// <summary>Readable message for an unreachable database or one without the fg tables (e.g. Prod before "migrate").</summary>
+    private static string? DatabaseProblem(HttpContext ctx, Exception? ex)
+    {
+        while (ex != null && ex is not SqlException) ex = ex.InnerException;
+        if (ex is not SqlException sql) return null;
+        string label;
+        try { label = ctx.RequestServices.GetService<DatabaseSelector>()?.Current.Label ?? "selected"; }
+        catch (Exception) { label = "selected"; }
+        if (sql.Number == 208 && sql.Message.Contains("'fg."))
+            return $"The {label} database is not set up for Finish Genius yet (the fg tables are missing). An administrator must run the \"migrate\" command for it first.";
+        if (ConnectionErrors.Contains(sql.Number))
+            return $"Cannot connect to the {label} database. Check that the server is reachable and try again.";
+        return null;
     }
 
     private static async Task Write(HttpContext ctx, int status, string message)

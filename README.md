@@ -22,7 +22,12 @@ copy backend\FinishGenius.Api\appsettings.Local.example.json backend\FinishGeniu
 powershell -ExecutionPolicy Bypass -File .\run-local.ps1
 ```
 
+To **restart** everything (stops whatever runs on ports 5080/5180, starts both again, opens the browser), double-click
+`restart-local.bat`.
+
 Sign in with **admin / Admin@12345** (created on first start — change it under *Profile & password*).
+The sign-in page has a **Database** switch (Development / Production) when `appsettings.Local.json` lists more than one
+database under `Databases`.
 
 Full guide: [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md)
 

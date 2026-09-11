@@ -9,10 +9,19 @@ namespace FinishGenius.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me) : ControllerBase
+public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me, DatabaseCatalog databases, DatabaseSelector database) : ControllerBase
 {
     public record LoginRequest(string Username, string Password, bool RememberMe);
     public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
+    /// <summary>Databases offered on the sign-in page (connection details never leave the server).</summary>
+    [HttpGet("databases")]
+    [AllowAnonymous]
+    public IActionResult Databases() => Ok(new
+    {
+        Databases = databases.All.Select(d => new { d.Key, d.Label, d.Production }),
+        Default = databases.Default.Key,
+    });
 
     [HttpPost("login")]
     [AllowAnonymous]
@@ -33,7 +42,7 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
             user.PasswordHash = Passwords.Hash(req.Password!); // upgrade legacy hash
         user.LastLoginAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
-        var (token, expires) = tokens.Create(user, req.RememberMe);
+        var (token, expires) = tokens.Create(user, req.RememberMe, database.Current.Key);
         return Ok(new { token, expires });
     }
 
@@ -55,6 +64,7 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
             Roles = user.Roles.Select(r => r.Role).ToList(),
             Groups = groups,
             UnreadMessages = unread,
+            Database = new { database.Current.Key, database.Current.Label, database.Current.Production },
         });
     }
 

@@ -14,6 +14,14 @@ export const tokenStore = {
   },
 }
 
+const DATABASE_KEY = 'fg.database'
+
+/** Database picked on the sign-in page (Dev / Prod), remembered for the next sign-in. */
+export const databaseStore = {
+  get: () => localStorage.getItem(DATABASE_KEY),
+  set: (key: string) => localStorage.setItem(DATABASE_KEY, key),
+}
+
 export const api = axios.create({ baseURL: import.meta.env.BASE_URL.replace(/\/$/, '') + '/api' })
 
 api.interceptors.request.use((config) => {

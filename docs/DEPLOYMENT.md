@@ -68,16 +68,24 @@ Browse to `http://<VM external IP>/` and sign in (`admin` / the `Seed:AdminPassw
 
 ```json
 {
-  "ConnectionStrings": { "Default": "Server=34.74.178.204;Database=FGAPP_21_May_2024;User Id=FGAPP;Password=***;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15" },
+  "Databases": {
+    "Dev":  { "Label": "Development", "AutoMigrate": true,
+              "ConnectionString": "Server=34.74.178.204;Database=FGAPP_21_May_2024;User Id=FGAPP;Password=***;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15" },
+    "Prod": { "Label": "Production", "AutoMigrate": false, "Production": true,
+              "ConnectionString": "Server=35.196.141.157;Database=FGAPP02232023_FULL_03012023_030118;User Id=FGAPP;Password=***;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15" }
+  },
   "Jwt": { "Key": "<long random secret, 32+ chars — keep the same value across servers/restarts>" },
   "Seed": { "AdminPassword": "<initial admin password, used only when no users exist>" },
-  "Database": { "AutoMigrate": true, "SeedDemoData": true },
+  "Database": { "Default": "Dev", "AutoMigrate": true, "SeedDemoData": false },
   "Storage": { "Root": "" }
 }
 ```
 
 | Setting | Meaning |
 |---|---|
+| `Databases:<Key>` | Databases offered on the sign-in page (only shown when there are 2+). `Label` is what users see, `Production: true` adds the live-data warning and an amber header badge. A lone `ConnectionStrings:Default` still works (one "Dev" database). |
+| `Databases:<Key>:AutoMigrate` | Create/update that database's `fg` schema on startup (default = `Database:AutoMigrate`). Prod is `false`: prepare it once with `dotnet FinishGenius.Api.dll migrate --db Prod`. |
+| `Database:Default` | Database used when none is chosen (and by the command-line tools without `--db`). |
 | `Database:AutoMigrate` | `true` = the app creates/updates the `fg` schema on startup. Set `false` if a DBA runs `FinishGenius_schema.sql` (idempotent) instead. |
 | `Database:SeedDemoData` | Default `false`. `true` creates an "AWFI Demo Group" with sample data (for a brand-new, empty database). |
 | `Storage:Root` | Upload folder. Empty = `<site>\App_Data\uploads`. Can be a larger disk, e.g. `D:\FinishGeniusData`. Back it up. |
@@ -93,6 +101,9 @@ needs `db_owner`, or `db_ddladmin` + read/write for migrations).
 - To (re)load the real data from the legacy `FGAPP` database on the same SQL Server, run from the site folder:
   `dotnet FinishGenius.Api.dll import-legacy --source FGAPP --yes` (stop the site first; this replaces all `fg` data).
   See [LEGACY_IMPORT.md](LEGACY_IMPORT.md), including where to copy legacy document/photo files.
+- Both commands accept `--db <Key>` to work on another configured database, e.g. setting up Production:
+  `dotnet FinishGenius.Api.dll migrate --db Prod`, then
+  `dotnet FinishGenius.Api.dll import-legacy --db Prod --source FGAPP02232023_FULL_03012023_030118 --yes`.
 
 ## 5. HTTPS (recommended)
 

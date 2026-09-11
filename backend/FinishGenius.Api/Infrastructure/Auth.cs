@@ -27,7 +27,7 @@ public class TokenService(Microsoft.Extensions.Options.IOptions<JwtOptions> opti
 {
     private readonly JwtOptions _o = options.Value;
 
-    public (string token, DateTime expires) Create(User user, bool rememberMe)
+    public (string token, DateTime expires) Create(User user, bool rememberMe, string database)
     {
         var expires = rememberMe ? DateTime.UtcNow.AddDays(_o.RememberMeDays) : DateTime.UtcNow.AddHours(_o.ExpiryHours);
         var claims = new List<Claim>
@@ -36,6 +36,7 @@ public class TokenService(Microsoft.Extensions.Options.IOptions<JwtOptions> opti
             new(ClaimTypes.Name, user.Username),
             new(ClaimTypes.Email, user.Email),
             new("groupId", user.GroupId.ToString()),
+            new(DatabaseCatalog.Claim, database),
         };
         claims.AddRange(user.Roles.Select(r => new Claim(ClaimTypes.Role, r.Role)));
         var token = new JwtSecurityToken(_o.Issuer, _o.Audience, claims, expires: expires,

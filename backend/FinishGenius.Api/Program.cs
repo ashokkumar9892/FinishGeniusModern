@@ -8,14 +8,14 @@ using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Secrets (connection string, JWT key) live in appsettings.Local.json, which is not committed to git.
+// Secrets (connection strings, JWT key) live in appsettings.Local.json, which is not committed to git.
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
-var connectionString = builder.Configuration.GetConnectionString("Default");
-if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("__SET_ME__"))
-    throw new InvalidOperationException("ConnectionStrings:Default is not configured. Copy appsettings.Local.example.json to appsettings.Local.json and fill it in.");
-
-builder.Services.AddDbContext<AppDbContext>(o => o.UseSqlServer(connectionString, sql =>
+// The user picks a database (Dev / Prod) on the sign-in page; every request then uses its session's database.
+var databases = new DatabaseCatalog(builder.Configuration);
+builder.Services.AddSingleton(databases);
+builder.Services.AddScoped<DatabaseSelector>();
+builder.Services.AddDbContext<AppDbContext>((sp, o) => o.UseSqlServer(sp.GetRequiredService<DatabaseSelector>().Current.ConnectionString, sql =>
 {
     sql.MigrationsHistoryTable("__EFMigrationsHistory", AppDbContext.Schema);
     sql.EnableRetryOnFailure(3);
@@ -55,6 +55,7 @@ builder.Services.AddScoped<TokenService>();
 builder.Services.AddSingleton<FileStorage>();
 builder.Services.AddScoped<FinishGenius.Api.Services.ScheduleCalculator>();
 builder.Services.AddScoped<FinishGenius.Api.Services.GroupCopyService>();
+builder.Services.AddScoped<FinishGenius.Api.Services.DeviceCommandService>();
 
 const long maxUpload = 250L * 1024 * 1024; // videos for work instructions
 builder.Services.Configure<FormOptions>(o => o.MultipartBodyLengthLimit = maxUpload);
@@ -69,28 +70,53 @@ builder.Services.AddControllers().AddJsonOptions(o =>
 
 var app = builder.Build();
 
-// One-off data import from the legacy Finish Genius database:
-//   dotnet FinishGenius.Api.dll import-legacy --source FGAPP --yes
-if (args.Length > 0 && args[0].Equals("import-legacy", StringComparison.OrdinalIgnoreCase))
+// Command-line tools (add --db Prod to work on another configured database; default = Database:Default):
+//   dotnet FinishGenius.Api.dll migrate --db Prod                    creates/updates the fg schema and base data
+//   dotnet FinishGenius.Api.dll import-legacy --source FGAPP --yes   one-off data import from the legacy database
+//   dotnet FinishGenius.Api.dll import-legacy-formulas --source FGAPP --yes   additive formula extras (never deletes)
+if (args.Length > 0 && args[0].ToLowerInvariant() is "import-legacy" or "migrate" or "import-legacy-formulas")
 {
-    var sourceIndex = Array.FindIndex(args, a => a.Equals("--source", StringComparison.OrdinalIgnoreCase));
-    var source = sourceIndex >= 0 && sourceIndex + 1 < args.Length ? args[sourceIndex + 1] : "FGAPP";
-    var confirmed = args.Any(a => a.Equals("--yes", StringComparison.OrdinalIgnoreCase));
-    using var importScope = app.Services.CreateScope();
-    var importDb = importScope.ServiceProvider.GetRequiredService<AppDbContext>();
-    importDb.Database.Migrate();
-    await new LegacyImporter(importDb, app.Configuration, app.Logger).RunAsync(source, confirmed);
+    string? Arg(string name)
+    {
+        var i = Array.FindIndex(args, a => a.Equals(name, StringComparison.OrdinalIgnoreCase));
+        return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+    }
+    var dbKey = Arg("--db");
+    var target = dbKey == null ? databases.Default : databases.Find(dbKey)
+        ?? throw new InvalidOperationException($"Unknown database '{dbKey}'. Configured: {string.Join(", ", databases.All.Select(d => d.Key))}.");
+    Console.WriteLine($"Database: {target.Key} ({target.Label})");
+    using var cliScope = app.Services.CreateScope();
+    cliScope.ServiceProvider.GetRequiredService<DatabaseSelector>().Use(target);
+    var cliDb = cliScope.ServiceProvider.GetRequiredService<AppDbContext>();
+    cliDb.Database.Migrate();
+    if (args[0].Equals("migrate", StringComparison.OrdinalIgnoreCase))
+        await DbSeeder.SeedAsync(cliDb, app.Configuration, app.Logger);
+    else if (args[0].Equals("import-legacy-formulas", StringComparison.OrdinalIgnoreCase))
+        await new LegacyImporter(cliDb, app.Configuration, app.Logger)
+            .RunFormulaExtrasAsync(Arg("--source") ?? "FGAPP", args.Any(a => a.Equals("--yes", StringComparison.OrdinalIgnoreCase)));
+    else
+        await new LegacyImporter(cliDb, app.Configuration, app.Logger)
+            .RunAsync(Arg("--source") ?? "FGAPP", args.Any(a => a.Equals("--yes", StringComparison.OrdinalIgnoreCase)));
     return;
 }
 
 app.UseMiddleware<ApiExceptionMiddleware>();
 
-if (app.Configuration.GetValue("Database:AutoMigrate", true))
+foreach (var target in databases.All.Where(d => d.AutoMigrate))
 {
-    using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
-    await DbSeeder.SeedAsync(db, app.Configuration, app.Logger);
+    try
+    {
+        using var scope = app.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<DatabaseSelector>().Use(target);
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.Database.Migrate();
+        await DbSeeder.SeedAsync(db, app.Configuration, app.Logger);
+    }
+    catch (Exception ex) when (target != databases.Default)
+    {
+        // An unreachable secondary database must not take the whole site down; sign-ins to it report the problem.
+        app.Logger.LogError(ex, "Could not migrate database {Database}", target.Key);
+    }
 }
 
 app.UseDefaultFiles();

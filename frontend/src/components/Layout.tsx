@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
-  BookOpen, Building2, Calculator, CalendarRange, ChevronsLeft, ChevronsRight, ClipboardCheck, DollarSign, FlaskConical,
+  BookOpen, Building2, Calculator, CalendarRange, ChevronsLeft, ChevronsRight, ClipboardCheck, Database, DollarSign, FlaskConical,
   HelpCircle, Images, KeyRound, Layers, LayoutDashboard, ListOrdered, LogOut, Mail, Menu, Moon, Package, Sun, Tags, Upload, UserCog, Users,
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -185,6 +185,19 @@ export function Layout() {
               placeholder="Select group"
             />
           </div>
+          {me.database && (
+            <span
+              className={clsx(
+                'badge hidden sm:inline-flex gap-1 ring-1',
+                me.database.production
+                  ? 'bg-amber-500/15 text-amber-700 ring-amber-500/40 dark:text-amber-300'
+                  : 'bg-muted text-muted-foreground ring-border',
+              )}
+              title={`Signed in to the ${me.database.label} database. Sign out to switch.`}
+            >
+              <Database className="h-3 w-3" /> {me.database.label}
+            </span>
+          )}
           <div className="flex-1" />
 
           <Dropdown

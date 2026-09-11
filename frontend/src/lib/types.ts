@@ -17,6 +17,14 @@ export interface Me {
   roles: string[]
   groups: GroupRef[]
   unreadMessages: number
+  database: DatabaseRef
+}
+
+/** A database the user can sign in to (GET /auth/databases). */
+export interface DatabaseRef {
+  key: string
+  label: string
+  production: boolean
 }
 
 export interface Option<T = string | number> {

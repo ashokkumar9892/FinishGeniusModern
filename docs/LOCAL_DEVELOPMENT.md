@@ -13,17 +13,25 @@ No ODBC driver is needed — .NET uses Microsoft.Data.SqlClient directly.
 
 ## 1. Configure secrets (once)
 
-`backend/FinishGenius.Api/appsettings.Local.json` is **git-ignored** and holds the connection string and JWT key:
+`backend/FinishGenius.Api/appsettings.Local.json` is **git-ignored** and holds the connection strings and JWT key:
 
 ```json
 {
-  "ConnectionStrings": {
-    "Default": "Server=34.74.178.204;Database=FGAPP_21_May_2024;User Id=FGAPP;Password=********;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15"
+  "Databases": {
+    "Dev":  { "Label": "Development", "AutoMigrate": true,
+              "ConnectionString": "Server=34.74.178.204;Database=FGAPP_21_May_2024;User Id=FGAPP;Password=********;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15" },
+    "Prod": { "Label": "Production", "AutoMigrate": false, "Production": true,
+              "ConnectionString": "Server=35.196.141.157;Database=FGAPP02232023_FULL_03012023_030118;User Id=FGAPP;Password=********;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15" }
   },
+  "Database": { "Default": "Dev" },
   "Jwt": { "Key": "a-long-random-secret-of-at-least-32-characters" },
   "Seed": { "AdminPassword": "Admin@12345" }
 }
 ```
+
+When more than one database is configured the sign-in page shows a **Database** switch (Development / Production).
+The session stays on the database it signed in to; the header shows a badge (amber for `"Production": true`), and
+signing out is how you switch. A single `ConnectionStrings:Default` (older config) still works as one "Dev" database.
 
 Copy `appsettings.Local.example.json` to create it. (The ODBC string
 `DRIVER={ODBC Driver 17 for SQL Server};SERVER=…;DATABASE=…;UID=…;PWD=…;Encrypt=no` maps to the

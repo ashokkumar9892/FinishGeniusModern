@@ -188,13 +188,15 @@ public class GroupCopyService(AppDbContext db, FileStorage files, CurrentUser me
             {
                 GroupId = destGroup, CategoryId = f.CategoryId == null ? null : await MapCategoryAsync(f.CategoryId.Value, destGroup),
                 Name = f.Name, Number = f.Number, CustomerName = f.CustomerName, IsComplete = f.IsComplete, BatchSize = f.BatchSize,
+                BatchType = f.BatchType, BatchValue = f.BatchValue, EmployeeName = f.EmployeeName, PurchaseOrderNumber = f.PurchaseOrderNumber,
+                MixedOn = DateTime.UtcNow,
                 ContainerType = f.ContainerType, ContainerPrice = f.ContainerPrice, MarkUp = f.MarkUp, Substrate = f.Substrate, Notes = f.Notes,
                 SpinDeltaL = f.SpinDeltaL, SpinDeltaA = f.SpinDeltaA, SpinDeltaB = f.SpinDeltaB, SpinDeltaE = f.SpinDeltaE,
                 SpexDeltaL = f.SpexDeltaL, SpexDeltaA = f.SpexDeltaA, SpexDeltaB = f.SpexDeltaB, SpexDeltaE = f.SpexDeltaE,
                 CreatedBy = me.Id,
             };
             foreach (var i in f.Ingredients)
-                copy.Ingredients.Add(new FormulaIngredient { MaterialId = await MapMaterialAsync(i.MaterialId, destGroup), Grams = i.Grams, Sequence = i.Sequence });
+                copy.Ingredients.Add(new FormulaIngredient { MaterialId = await MapMaterialAsync(i.MaterialId, destGroup), Grams = i.Grams, DispenseAmount = i.Grams, Sequence = i.Sequence });
             db.Formulas.Add(copy);
         }
         await db.SaveChangesAsync();

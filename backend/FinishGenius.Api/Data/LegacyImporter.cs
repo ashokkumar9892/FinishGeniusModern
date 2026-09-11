@@ -26,6 +26,7 @@ public class LegacyImporter(AppDbContext db, IConfiguration config, ILogger log)
     // Tables in delete order (children first).
     private static readonly string[] WipeOrder =
     [
+        "DeviceCommands", "FormulaDevicePreferences", "FormulaDispenseSnapshots", "DispenseSettings", "PurgeSettings", "PurgeFailures", "PurgeSuccesses",
         "WorkLineChecks", "WorkExecutionLines", "WorkExecutionDefects", "WorkExecutionAdders", "WorkExecutions", "DefectTypes", "AdderTypes",
         "WorkInstructionMedia", "WorkInstructionSteps", "WorkInstructionTrails", "WorkInstructionRelatedDocs", "WorkInstructionSignatures",
         "WorkInstructionItems", "WorkInstructions",
@@ -67,6 +68,7 @@ public class LegacyImporter(AppDbContext db, IConfiguration config, ILogger log)
             await ImportFilesAndDevices();
             await ImportMyWork();
             await ImportWorkInstructionsAndMessages();
+            await ImportFormulaExtrasAsync();
             await EnsureAdminAsync();
             await ReportAsync();
         }
@@ -75,6 +77,190 @@ public class LegacyImporter(AppDbContext db, IConfiguration config, ILogger log)
             await db.Database.CloseConnectionAsync();
         }
         Console.WriteLine($"Legacy import finished in {total.Elapsed:mm\\:ss}.");
+    }
+
+    /// <summary>
+    /// <c>import-legacy-formulas</c>: additive, re-runnable import of the formula workspace data only (no wipe). Fills new
+    /// columns where they are still empty, inserts rows that do not exist yet, and corrects the Status / Container Type
+    /// mapping of formulas that were never edited in the new app.
+    /// </summary>
+    public async Task RunFormulaExtrasAsync(string sourceDb, bool confirmed)
+    {
+        if (!Regex.IsMatch(sourceDb, @"^[A-Za-z0-9_\-]+$")) throw new ArgumentException("Invalid source database name.");
+        var target = db.Database.GetDbConnection().Database;
+        Console.WriteLine($"Legacy formula extras import: [{sourceDb}].dbo -> [{target}].fg (additive, nothing is deleted)");
+        if (!confirmed)
+        {
+            Console.WriteLine("Imports: formula status/container fix, batch type, employee, PO #, mixed on, dispenser, ingredient dispense amounts and batches,");
+            Console.WriteLine("material colour codes, scale/printer preferences, clean-nozzle settings, purge settings/history and the formula View History.");
+            Console.WriteLine("Re-run with --yes to continue.");
+            return;
+        }
+        _s = $"[{sourceDb}].dbo.";
+        await db.Database.OpenConnectionAsync();
+        _conn = db.Database.GetDbConnection();
+        var total = Stopwatch.StartNew();
+        try
+        {
+            await Exec("Check source", $"SELECT TOP 1 1 FROM {_s}Materials");
+            await ImportFormulaExtrasAsync();
+            Console.WriteLine("\nRow counts:");
+            foreach (var (label, sql) in new[]
+                     {
+                         ("Formulas (Complete)", "SELECT COUNT_BIG(*) FROM fg.Formulas WHERE IsComplete = 1"),
+                         ("Formulas with employee", "SELECT COUNT_BIG(*) FROM fg.Formulas WHERE EmployeeName IS NOT NULL"),
+                         ("Ingredients with a batch", "SELECT COUNT_BIG(*) FROM fg.FormulaIngredients WHERE BatchNumber IS NOT NULL"),
+                         ("Ingredients to dispense", "SELECT COUNT_BIG(*) FROM fg.FormulaIngredients WHERE DispenseAmount > 0"),
+                         ("Materials with colour", "SELECT COUNT_BIG(*) FROM fg.Materials WHERE ColorCode IS NOT NULL"),
+                         ("FormulaDevicePreferences", "SELECT COUNT_BIG(*) FROM fg.FormulaDevicePreferences"),
+                         ("DispenseSettings", "SELECT COUNT_BIG(*) FROM fg.DispenseSettings"),
+                         ("PurgeSettings", "SELECT COUNT_BIG(*) FROM fg.PurgeSettings"),
+                         ("PurgeSuccesses", "SELECT COUNT_BIG(*) FROM fg.PurgeSuccesses"),
+                         ("PurgeFailures", "SELECT COUNT_BIG(*) FROM fg.PurgeFailures"),
+                         ("Formula history rows", "SELECT COUNT_BIG(*) FROM fg.AuditLogs WHERE EntityType = 'Formula'"),
+                     })
+            {
+                await using var cmd = _conn.CreateCommand();
+                cmd.CommandText = sql;
+                var n = (long)(await cmd.ExecuteScalarAsync() ?? 0L);
+                Console.WriteLine($"  {label,-28} {n,12:N0}");
+            }
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync();
+        }
+        Console.WriteLine($"Legacy formula extras import finished in {total.Elapsed:mm\\:ss}.");
+    }
+
+    // ------------------------------------------------------------------ formula workspace extras (additive)
+
+    private const string ContainerCase = "CASE m.ContainerType WHEN 1 THEN '1 Gallon' WHEN 2 THEN '5 Gallons' WHEN 3 THEN 'Drum' WHEN 4 THEN 'Quartz' END";
+
+    private async Task ImportFormulaExtrasAsync()
+    {
+        var s = _s;
+        // Legacy StatusEnum: Complete = 1, Incomplete = 2; ContainerTypesEnum: 1 Gallon, 5 Gallons, Drum, Quartz.
+        await Exec("Formulas: status & container type", $"""
+            UPDATE f SET IsComplete = CASE WHEN m.Status = 1 THEN 1 ELSE 0 END, ContainerType = {ContainerCase}
+            FROM fg.Formulas f JOIN {s}Materials m ON m.ID = f.Id AND m.Discriminator = 'Formulation'
+            WHERE f.UpdatedAt IS NULL
+              AND (f.IsComplete <> CASE WHEN m.Status = 1 THEN 1 ELSE 0 END OR ISNULL(f.ContainerType, '') <> ISNULL({ContainerCase}, ''));
+            """);
+
+        await Exec("Formulas: batch type, employee, PO, mixed on", $"""
+            UPDATE f SET
+                BatchType = CASE WHEN m.BatchType BETWEEN 1 AND 5 THEN m.BatchType ELSE 2 END,
+                BatchValue = CASE WHEN ISNULL(m.BatchValue, 0) > 0 THEN {D("m.BatchValue")}
+                                  WHEN m.BatchType = 4 THEN {D("m.GramsInBatch / 1000.0")}
+                                  WHEN ISNULL(m.BatchType, 2) = 2 THEN {D("m.GramsInBatch")} ELSE f.BatchValue END,
+                EmployeeName = ISNULL(f.EmployeeName, LEFT(NULLIF(LTRIM(RTRIM(m.EmployeeName)), ''), 400)),
+                PurchaseOrderNumber = ISNULL(f.PurchaseOrderNumber, LEFT(NULLIF(LTRIM(RTRIM(m.PurchaseOrderNumber)), ''), 400)),
+                MixedOn = ISNULL(f.MixedOn, m.MixedOn),
+                DispenserId = ISNULL(f.DispenserId, d.Id)
+            FROM fg.Formulas f
+            JOIN {s}Materials m ON m.ID = f.Id AND m.Discriminator = 'Formulation'
+            LEFT JOIN fg.Devices d ON d.Id = m.DispenserID AND d.DeviceType = 7
+            WHERE f.UpdatedAt IS NULL
+              AND (f.BatchType <> CASE WHEN m.BatchType BETWEEN 1 AND 5 THEN m.BatchType ELSE 2 END
+                   OR (f.BatchValue = 0 AND (ISNULL(m.BatchValue, 0) > 0 OR ISNULL(m.GramsInBatch, 0) > 0))
+                   OR (f.EmployeeName IS NULL AND NULLIF(LTRIM(RTRIM(m.EmployeeName)), '') IS NOT NULL)
+                   OR (f.PurchaseOrderNumber IS NULL AND NULLIF(LTRIM(RTRIM(m.PurchaseOrderNumber)), '') IS NOT NULL)
+                   OR (f.MixedOn IS NULL AND m.MixedOn IS NOT NULL)
+                   OR (f.DispenserId IS NULL AND d.Id IS NOT NULL));
+            """);
+
+        // Rows are matched like the main import numbered them (Sequence = ROW_NUMBER by legacy id per formula).
+        await Exec("Ingredients: dispense amounts & batches", $"""
+            WITH src AS (
+                SELECT fm.FormulationID, fm.ColourID, fm.DispenseAmmount, fm.TotalDispensedAmmount, fm.isDispensed,
+                       ROW_NUMBER() OVER (PARTITION BY fm.FormulationID ORDER BY fm.ID) AS Seq
+                FROM {s}FormulationMaterials fm
+                JOIN fg.Formulas f ON f.Id = fm.FormulationID
+                JOIN fg.Materials m ON m.Id = fm.ColourID),
+            bat AS (
+                SELECT fmb.FormulationID, fmb.MaterialID, MAX(b.BatchNum) AS BatchNum
+                FROM {s}FormulationMaterialBatch fmb JOIN {s}MaterialBatches b ON b.BatchID = fmb.BatchID
+                GROUP BY fmb.FormulationID, fmb.MaterialID)
+            UPDATE i SET
+                DispenseAmount = {D("src.DispenseAmmount")},
+                DispensedGrams = {D("src.TotalDispensedAmmount")},
+                IsDispensed = ISNULL(src.isDispensed, 0),
+                BatchNumber = ISNULL(i.BatchNumber, LEFT(NULLIF(LTRIM(RTRIM(bat.BatchNum)), ''), 400))
+            FROM fg.FormulaIngredients i
+            JOIN fg.Formulas f ON f.Id = i.FormulaId AND f.UpdatedAt IS NULL
+            JOIN src ON src.FormulationID = i.FormulaId AND src.Seq = i.Sequence AND src.ColourID = i.MaterialId
+            LEFT JOIN bat ON bat.FormulationID = i.FormulaId AND bat.MaterialID = i.MaterialId
+            WHERE i.DispenseAmount <> {D("src.DispenseAmmount")} OR i.DispensedGrams <> {D("src.TotalDispensedAmmount")}
+               OR (i.BatchNumber IS NULL AND NULLIF(LTRIM(RTRIM(bat.BatchNum)), '') IS NOT NULL);
+            """);
+
+        await Exec("Materials: colour codes", $"""
+            UPDATE m SET ColorCode = LEFT(LTRIM(RTRIM(lm.ColorCode)), 400)
+            FROM fg.Materials m JOIN {s}Materials lm ON lm.ID = m.Id
+            WHERE m.ColorCode IS NULL AND NULLIF(LTRIM(RTRIM(lm.ColorCode)), '') IS NOT NULL;
+            """);
+
+        await Exec("Scale / printer preferences", $"""
+            WITH sc AS (SELECT UserID, MaterialID, MAX(LastUsedScaleDeviceID) AS ScaleId FROM {s}FormulationScales
+                        WHERE UserID IS NOT NULL AND MaterialID IS NOT NULL GROUP BY UserID, MaterialID),
+                 pr AS (SELECT UserID, MaterialID, MAX(LastUsedPrinterDeviceID) AS PrinterId FROM {s}FormulationPrinters
+                        WHERE UserID IS NOT NULL AND MaterialID IS NOT NULL GROUP BY UserID, MaterialID),
+                 x AS (SELECT COALESCE(sc.UserID, pr.UserID) AS UserId, COALESCE(sc.MaterialID, pr.MaterialID) AS FormulaId, sc.ScaleId, pr.PrinterId
+                       FROM sc FULL OUTER JOIN pr ON pr.UserID = sc.UserID AND pr.MaterialID = sc.MaterialID)
+            INSERT INTO fg.FormulaDevicePreferences (UserId, FormulaId, ScaleDeviceId, PrinterDeviceId, UpdatedAt)
+            SELECT x.UserId, x.FormulaId, ds.Id, dp.Id, SYSUTCDATETIME()
+            FROM x
+            JOIN fg.Users u ON u.Id = x.UserId
+            JOIN fg.Formulas f ON f.Id = x.FormulaId
+            LEFT JOIN fg.Devices ds ON ds.Id = x.ScaleId AND ds.DeviceType IN (2, 4)
+            LEFT JOIN fg.Devices dp ON dp.Id = x.PrinterId AND dp.DeviceType = 5
+            WHERE (ds.Id IS NOT NULL OR dp.Id IS NOT NULL)
+              AND NOT EXISTS (SELECT 1 FROM fg.FormulaDevicePreferences p WHERE p.UserId = x.UserId AND p.FormulaId = x.FormulaId);
+            """);
+
+        await Exec("Clean nozzle settings", $"""
+            INSERT INTO fg.DispenseSettings (GroupId, CleanNozzleHours, IsNozzleCleaned, LastDispensedAt)
+            SELECT t.GroupId, NULLIF(MAX(ISNULL(t.DespenseTimeSpan, 0)), 0), CAST(MAX(CASE WHEN t.IsCleanNozzle = 1 THEN 1 ELSE 0 END) AS bit), NULL
+            FROM {s}GroupDispenseTimeSpanMapping t JOIN fg.Groups g ON g.Id = t.GroupId
+            WHERE NOT EXISTS (SELECT 1 FROM fg.DispenseSettings d WHERE d.GroupId = t.GroupId)
+            GROUP BY t.GroupId;
+            """);
+
+        // Purge tables are keyed by the Network Bridge API key; devices kept their legacy keys.
+        await Exec("Purge settings", $"""
+            INSERT INTO fg.PurgeSettings (BridgeDeviceId, FromDate, ToDate, Time, CreatedBy, CreatedAt, UpdatedBy, UpdatedAt)
+            SELECT d.Id, p.FromDate, p.ToDate, p.Time, p.CreatedBy, ISNULL(p.CreatedDate, SYSUTCDATETIME()), p.UpdatedBy, p.UpdatedDate
+            FROM {s}PurgeSettings p JOIN fg.Devices d ON d.ApiKey = TRY_CAST(p.ApiKey AS uniqueidentifier) AND d.DeviceType = 6
+            WHERE NOT EXISTS (SELECT 1 FROM fg.PurgeSettings x WHERE x.BridgeDeviceId = d.Id);
+            """);
+
+        await Exec("Purge history (success)", $"""
+            INSERT INTO fg.PurgeSuccesses (BridgeDeviceId, CanisterNumber, Message, PurgeType, ExecutedAt, CreatedAt)
+            SELECT d.Id, p.CanisterNumber, LEFT(p.Message, 400), LEFT(p.PurgeType, 400), p.ExecuedDate, p.CreatedDate
+            FROM {s}PurgeSucess p JOIN fg.Devices d ON d.ApiKey = TRY_CAST(p.ApiKey AS uniqueidentifier)
+            WHERE NOT EXISTS (SELECT 1 FROM fg.PurgeSuccesses x WHERE x.BridgeDeviceId = d.Id AND x.CanisterNumber = p.CanisterNumber AND x.CreatedAt = p.CreatedDate);
+            """);
+
+        await Exec("Purge history (failed)", $"""
+            INSERT INTO fg.PurgeFailures (BridgeDeviceId, CanisterNumber, Message, IsActive, CreatedAt)
+            SELECT d.Id, p.CanisterNumber, LEFT(p.Message, 400), p.IsActive, p.CreatedDate
+            FROM {s}PurgeFailed p JOIN fg.Devices d ON d.ApiKey = TRY_CAST(p.ApiKey AS uniqueidentifier)
+            WHERE NOT EXISTS (SELECT 1 FROM fg.PurgeFailures x WHERE x.BridgeDeviceId = d.Id AND x.CanisterNumber = p.CanisterNumber AND x.CreatedAt = p.CreatedDate);
+            """);
+
+        await Exec("Formula View History", $"""
+            INSERT INTO fg.AuditLogs (GroupId, UserId, UserName, EntityType, EntityId, Action, Details, OldValue, NewValue, CreatedAt)
+            SELECT f.GroupId, u.Id, LEFT(lu.Username, 400), 'Formula', h.CategoryId, LEFT(ISNULL(NULLIF(LTRIM(RTRIM(h.Field)), ''), 'History'), 400),
+                   LEFT(h.Description, 4000), LEFT(h.OldValue, 400), LEFT(h.NewValue, 400), h.CreatedDate
+            FROM {s}History h
+            JOIN fg.Formulas f ON f.Id = h.CategoryId
+            LEFT JOIN {s}[User] lu ON lu.ID = h.UserId
+            LEFT JOIN fg.Users u ON u.Id = h.UserId
+            WHERE h.HistoryCategory = 0 AND h.CategoryId > 0
+              AND NOT EXISTS (SELECT 1 FROM fg.AuditLogs a WHERE a.EntityType = 'Formula' AND a.EntityId = h.CategoryId AND a.CreatedAt = h.CreatedDate
+                              AND a.Action = LEFT(ISNULL(NULLIF(LTRIM(RTRIM(h.Field)), ''), 'History'), 400));
+            """);
     }
 
     private async Task<int> Exec(string name, string sql)
@@ -194,9 +380,9 @@ public class LegacyImporter(AppDbContext db, IConfiguration config, ILogger log)
                                      CreatedBy, IsDeleted, CreatedAt, UpdatedAt)
             SELECT m.ID, ISNULL(g.Id, @master), c.Id,
                    LEFT(ISNULL(NULLIF(LTRIM(RTRIM(m.ManufacturersProductName)), ''), CONCAT('(unnamed #', m.ID, ')')), 400),
-                   LEFT(LTRIM(RTRIM(m.ManufacturersProductCode)), 400), LEFT(m.CustomerName, 400), CASE WHEN m.Status = 2 THEN 1 ELSE 0 END,
+                   LEFT(LTRIM(RTRIM(m.ManufacturersProductCode)), 400), LEFT(m.CustomerName, 400), CASE WHEN m.Status = 1 THEN 1 ELSE 0 END,
                    {D("m.GramsInBatch")},
-                   CASE m.ContainerType WHEN 1 THEN 'Pint' WHEN 2 THEN 'Quart' WHEN 3 THEN 'Gallon' WHEN 4 THEN '5 Gallon' END,
+                   {ContainerCase},
                    {D("m.ContainerPrice")}, {D("m.MarkUp")}, LEFT(m.Substrate, 400), LEFT(m.Notes, 4000),
                    TRY_CAST(m.SpinDeltaL AS decimal(18,4)), TRY_CAST(m.SpinDeltaA AS decimal(18,4)), TRY_CAST(m.SpinDeltaB AS decimal(18,4)), TRY_CAST(m.SpinDeltaE AS decimal(18,4)),
                    TRY_CAST(m.SpexDeltaL AS decimal(18,4)), TRY_CAST(m.SpexDeltaA AS decimal(18,4)), TRY_CAST(m.SpexDeltaB AS decimal(18,4)), TRY_CAST(m.SpexDeltaE AS decimal(18,4)),

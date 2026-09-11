@@ -90,6 +90,8 @@ public class Material : GroupOwned
     public decimal MinQuantity { get; set; }
     public int? VendorId { get; set; }
     public string? Notes { get; set; }
+    /// <summary>Tint colour (e.g. "#1f4e9c") shown in the dispense animation (legacy Materials.ColorCode).</summary>
+    public string? ColorCode { get; set; }
     public bool IsDeleted { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
@@ -173,8 +175,20 @@ public class Formula : GroupOwned
     public string? Number { get; set; }
     public string? CustomerName { get; set; }
     public bool IsComplete { get; set; }
-    /// <summary>Batch size in grams used by the ingredient list.</summary>
+    /// <summary>Total formula weight in grams (legacy GramsInBatch).</summary>
     public decimal BatchSize { get; set; }
+    /// <summary>Unit the batch size is entered in (legacy BatchType).</summary>
+    public FormulaBatchType BatchType { get; set; } = FormulaBatchType.Grams;
+    /// <summary>Batch size in <see cref="BatchType"/> units (legacy BatchValue).</summary>
+    public decimal BatchValue { get; set; }
+    /// <summary>"Employee Name" / "Mixed By" on prints and labels.</summary>
+    public string? EmployeeName { get; set; }
+    public string? PurchaseOrderNumber { get; set; }
+    /// <summary>Last time the formula was saved/mixed ("Mixed On").</summary>
+    public DateTime? MixedOn { get; set; }
+    /// <summary>Default Dispense Machine for this formula (legacy DispenserID).</summary>
+    public int? DispenserId { get; set; }
+    /// <summary>Legacy container types: "1 Gallon", "5 Gallons", "Drum", "Quartz".</summary>
     public string? ContainerType { get; set; }
     public decimal ContainerPrice { get; set; }
     public decimal MarkUp { get; set; }
@@ -202,8 +216,13 @@ public class FormulaIngredient
     public int MaterialId { get; set; }
     public Material? Material { get; set; }
     public decimal Grams { get; set; }
+    /// <summary>"Amount to Dispense" in grams (legacy DispenseAmmount).</summary>
+    public decimal DispenseAmount { get; set; }
+    /// <summary>"Total Dispensed" in grams (legacy TotalDispensedAmmount).</summary>
     public decimal DispensedGrams { get; set; }
     public bool IsDispensed { get; set; }
+    /// <summary>Inventory batch the ingredient is taken from (legacy FormulationMaterialBatch → MaterialBatches.BatchNum).</summary>
+    public string? BatchNumber { get; set; }
     public int Sequence { get; set; }
 }
 

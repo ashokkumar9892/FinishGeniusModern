@@ -38,6 +38,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<DeviceCanister> DeviceCanisters => Set<DeviceCanister>();
     public DbSet<DeviceMetric> DeviceMetrics => Set<DeviceMetric>();
+    public DbSet<DeviceCommand> DeviceCommands => Set<DeviceCommand>();
+    public DbSet<FormulaDevicePreference> FormulaDevicePreferences => Set<FormulaDevicePreference>();
+    public DbSet<FormulaDispenseSnapshot> FormulaDispenseSnapshots => Set<FormulaDispenseSnapshot>();
+    public DbSet<DispenseSetting> DispenseSettings => Set<DispenseSetting>();
+    public DbSet<PurgeSetting> PurgeSettings => Set<PurgeSetting>();
+    public DbSet<PurgeFailure> PurgeFailures => Set<PurgeFailure>();
+    public DbSet<PurgeSuccess> PurgeSuccesses => Set<PurgeSuccess>();
 
     public DbSet<IndustrySector> IndustrySectors => Set<IndustrySector>();
     public DbSet<SubStep> SubSteps => Set<SubStep>();
@@ -113,6 +120,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         b.Entity<MaterialCategory>().HasMany(x => x.Characteristics).WithOne().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Cascade);
         b.Entity<Material>().HasIndex(x => new { x.GroupId, x.MaterialType, x.IsDeleted });
         b.Entity<InventoryTransaction>().HasIndex(x => new { x.MaterialId });
+        b.Entity<InventoryTransaction>().HasIndex(x => new { x.GroupId, x.BatchNumber });
         b.Entity<PurchaseOrder>().HasMany(x => x.Lines).WithOne().HasForeignKey(x => x.PurchaseOrderId).OnDelete(DeleteBehavior.Cascade);
         b.Entity<Formula>().HasMany(x => x.Ingredients).WithOne().HasForeignKey(x => x.FormulaId).OnDelete(DeleteBehavior.Cascade);
         b.Entity<Document>().HasMany(x => x.Links).WithOne().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
@@ -121,6 +129,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         b.Entity<Device>().HasMany(x => x.Canisters).WithOne().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Cascade);
         b.Entity<Device>().HasIndex(x => x.ApiKey).IsUnique();
         b.Entity<DeviceMetric>().HasIndex(x => new { x.DeviceId, x.Timestamp });
+
+        // Formula workspace: dispensing, batches, device preferences, purge history, bridge commands.
+        b.Entity<Formula>().Property(x => x.BatchType).HasDefaultValue(FormulaBatchType.Grams).HasSentinel(FormulaBatchType.Grams);
+        b.Entity<DeviceCommand>().Property(x => x.Payload).HasMaxLength(int.MaxValue);
+        b.Entity<DeviceCommand>().Property(x => x.ResultData).HasMaxLength(4000);
+        b.Entity<DeviceCommand>().Property(x => x.ResultMessage).HasMaxLength(4000);
+        b.Entity<DeviceCommand>().HasIndex(x => new { x.BridgeDeviceId, x.Status });
+        b.Entity<DeviceCommand>().HasIndex(x => new { x.FormulaId, x.CommandType });
+        b.Entity<FormulaDevicePreference>().HasIndex(x => new { x.UserId, x.FormulaId }).IsUnique();
+        b.Entity<FormulaDispenseSnapshot>().HasIndex(x => x.FormulaId);
+        b.Entity<DispenseSetting>().HasIndex(x => x.GroupId).IsUnique();
+        b.Entity<PurgeSetting>().HasIndex(x => x.BridgeDeviceId).IsUnique();
+        b.Entity<PurgeFailure>().HasIndex(x => new { x.BridgeDeviceId, x.IsActive });
+        b.Entity<PurgeSuccess>().HasIndex(x => new { x.BridgeDeviceId, x.ExecutedAt });
 
         b.Entity<SubStep>().HasMany(x => x.PullDowns).WithOne().HasForeignKey(x => x.SubStepId).OnDelete(DeleteBehavior.Cascade);
         b.Entity<SubStep>().HasIndex(x => new { x.IndustrySectorId, x.Sequence }).IsUnique();

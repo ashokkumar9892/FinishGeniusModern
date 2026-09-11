@@ -1,12 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, tokenStore } from './api'
+import { api, databaseStore, tokenStore } from './api'
 import type { GroupRef, Lookups, Me } from './types'
 
 interface AuthState {
   me: Me | undefined
   loading: boolean
-  login: (username: string, password: string, remember: boolean) => Promise<void>
+  login: (username: string, password: string, remember: boolean, database?: string) => Promise<void>
   logout: () => void
   refresh: () => Promise<unknown>
 }
@@ -27,8 +27,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   })
 
   const login = useCallback(
-    async (username: string, password: string, remember: boolean) => {
-      const res = await api.post<{ token: string }>('/auth/login', { username, password, rememberMe: remember })
+    async (username: string, password: string, remember: boolean, database?: string) => {
+      tokenStore.clear() // a leftover session token would otherwise decide which database the sign-in goes to
+      const res = await api.post<{ token: string }>(
+        '/auth/login',
+        { username, password, rememberMe: remember },
+        database ? { headers: { 'X-FG-Database': database } } : undefined,
+      )
+      if (database) {
+        if (database !== databaseStore.get()) localStorage.removeItem(GROUP_KEY) // group ids differ between databases
+        databaseStore.set(database)
+      }
       tokenStore.set(res.data.token, remember)
       qc.clear()
       setHasToken(true)

@@ -101,6 +101,9 @@ public class AuditLog
     public int EntityId { get; set; }
     public string Action { get; set; } = "";
     public string? Details { get; set; }
+    /// <summary>Optional before/after values (formula "View History" columns Old Value / New Value).</summary>
+    public string? OldValue { get; set; }
+    public string? NewValue { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

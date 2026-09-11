@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, CircleDashed, Copy, CopyPlus, DollarSign, FileText, FlaskConical, History, Pencil, Plus, Printer, Trash2 } from 'lucide-react'
+import { CheckCircle2, CircleDashed, Copy, CopyPlus, DollarSign, Droplets, FileText, Filter, FlaskConical, History, Pencil, Plus, Printer, Trash2 } from 'lucide-react'
 import clsx from 'clsx'
 import { api, errorMessage } from '@/lib/api'
 import { useGroup, useMe } from '@/lib/auth'
 import { isAdmin } from '@/lib/access'
-import { money } from '@/lib/format'
+import { money, num } from '@/lib/format'
 import { ConfirmDialog, ErrorBanner, PageHeader, SearchInput, StatCard } from '@/components/ui'
 import { DataTable, type Column } from '@/components/DataTable'
 import { EntityDocuments } from '@/components/EntityDocuments'
 import { HistoryModal } from '@/components/HistoryModal'
 import { useToast } from '@/components/toast'
-import { BulkCopyModal, CopyFormulaModal, StatusBadge } from './FormulaModals'
-import type { FormulaRow } from './types'
+import { BulkCopyModal, CopyFormulaModal, CreateFormulaModal, PrintDeniedModal, StatusBadge } from './FormulaModals'
+import { CleanNozzleModal, PurgeHistoryModal, PurgeModal } from './DispensingModals'
+import type { DispenseSettings, FormulaRow } from './types'
 
 type Status = 'all' | 'complete' | 'incomplete'
 
@@ -33,6 +34,11 @@ export default function FormulasPage() {
   const [historyRow, setHistoryRow] = useState<FormulaRow | null>(null)
   const [deleteRow, setDeleteRow] = useState<FormulaRow | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [printDenied, setPrintDenied] = useState(false)
+  const [nozzleOpen, setNozzleOpen] = useState(false)
+  const [purgeOpen, setPurgeOpen] = useState(false)
+  const [purgeHistoryOpen, setPurgeHistoryOpen] = useState(false)
 
   useEffect(() => setSelected([]), [groupId])
 
@@ -40,6 +46,11 @@ export default function FormulasPage() {
   const q = useQuery({
     queryKey: ['formulas', groupId],
     queryFn: () => api.get<FormulaRow[]>('/formulas', { params: { groupId } }).then((r) => r.data),
+    enabled: groupId > 0,
+  })
+  const settings = useQuery({
+    queryKey: ['dispense-settings', groupId],
+    queryFn: () => api.get<DispenseSettings>('/dispensing/settings', { params: { groupId } }).then((r) => r.data),
     enabled: groupId > 0,
   })
   const rows = useMemo(() => q.data ?? [], [q.data])
@@ -94,14 +105,22 @@ export default function FormulasPage() {
       { key: 'customerName', header: 'Customer Name', hideBelow: 'sm' },
       { key: 'status', header: 'Status', sortValue: (r) => (r.isComplete ? 1 : 0), cell: (r) => <StatusBadge complete={r.isComplete} /> },
       {
+        key: 'gramsInBatch',
+        header: 'Grams in Batch',
+        align: 'right',
+        hideBelow: 'lg',
+        className: 'tabular-nums',
+        cell: (r) => (r.gramsInBatch ? num(r.gramsInBatch, 2) : <span className="text-muted-foreground">—</span>),
+      },
+      {
         key: 'cost',
-        header: 'Cost',
+        header: 'Formula Cost',
         align: 'right',
         hideBelow: 'lg',
         className: 'tabular-nums',
         cell: (r) =>
           r.ingredientCount ? (
-            <span title={`Formula price ${money(r.price)} · ${r.ingredientCount} ingredient${r.ingredientCount === 1 ? '' : 's'}`}>{money(r.cost)}</span>
+            <span title={`Material cost ${money(r.cost)} · formula price ${money(r.price)} · ${r.ingredientCount} ingredient${r.ingredientCount === 1 ? '' : 's'}`}>{money(r.price)}</span>
           ) : (
             <span className="text-muted-foreground">—</span>
           ),
@@ -116,13 +135,21 @@ export default function FormulasPage() {
             <button className="btn-icon" title="Edit" onClick={() => navigate(`/formulas/${r.id}`)}>
               <Pencil className="h-4 w-4" />
             </button>
-            <button className="btn-icon" title="Copy" onClick={() => setCopyRow(r)}>
+            <button className="btn-icon" title="Copy to New" onClick={() => setCopyRow(r)}>
               <Copy className="h-4 w-4" />
             </button>
-            <button className="btn-icon" title="Print formula card" onClick={() => navigate(`/formulas/${r.id}?print=1`)}>
+            <button
+              className={clsx('btn-icon', !r.isComplete && 'opacity-50')}
+              title={r.isComplete ? 'Print' : 'Print (incomplete formulas cannot be printed)'}
+              onClick={() => (r.isComplete ? navigate(`/formulas/${r.id}?print=1`) : setPrintDenied(true))}
+            >
               <Printer className="h-4 w-4" />
             </button>
-            <button className="btn-icon" title="Documents" onClick={() => setDocsRow(r)}>
+            <button
+              className={clsx('btn-icon', r.hasDocs && 'bg-primary/10 text-primary hover:bg-primary/20')}
+              title={r.hasDocs ? 'Documents (has documents)' : 'Documents'}
+              onClick={() => setDocsRow(r)}
+            >
               <FileText className="h-4 w-4" />
             </button>
             {admin && (
@@ -143,8 +170,9 @@ export default function FormulasPage() {
   )
 
   const filtering = status !== 'all' || search.trim() !== ''
+  const bulkIds = selected.length > 0 ? selected.map(Number) : filtered.map((r) => r.id)
   const newButton = (
-    <button className="btn-primary" onClick={() => navigate('/formulas/new')}>
+    <button className="btn-primary" onClick={() => setCreateOpen(true)} disabled={groupId <= 0}>
       <Plus className="h-4 w-4" /> New Formulation
     </button>
   )
@@ -153,6 +181,7 @@ export default function FormulasPage() {
     { key: 'complete', label: 'Complete', count: stats.complete },
     { key: 'incomplete', label: 'Incomplete', count: stats.incomplete },
   ]
+  const canPurge = !!settings.data?.hasDispensers && !!settings.data?.hasBridges
 
   return (
     <>
@@ -162,8 +191,26 @@ export default function FormulasPage() {
         subtitle="Formulations, their ingredients, cost and colour match."
         actions={
           <>
+            {canPurge && (
+              <button className="btn-secondary" onClick={() => setPurgeOpen(true)}>
+                <Trash2 className="h-4 w-4" /> Purge
+              </button>
+            )}
+            <button className="btn-secondary" onClick={() => setNozzleOpen(true)} disabled={groupId <= 0}>
+              <Filter className="h-4 w-4" /> Clean Nozzle
+            </button>
             {admin && (
-              <button className="btn-secondary" disabled={selected.length === 0} onClick={() => setBulkOpen(true)} title={selected.length ? undefined : 'Select formulas in the list first'}>
+              <button className="btn-secondary" onClick={() => setPurgeHistoryOpen(true)} disabled={groupId <= 0}>
+                <History className="h-4 w-4" /> Purge History
+              </button>
+            )}
+            {admin && (
+              <button
+                className="btn-secondary"
+                disabled={bulkIds.length === 0}
+                onClick={() => setBulkOpen(true)}
+                title={selected.length ? `Copy the ${selected.length} selected formulas` : 'No rows selected: copies every formula in the (filtered) list'}
+              >
                 <CopyPlus className="h-4 w-4" /> Bulk Copy{selected.length > 0 && ` (${selected.length})`}
               </button>
             )}
@@ -178,6 +225,13 @@ export default function FormulasPage() {
         <StatCard label="Incomplete" value={stats.incomplete} icon={<CircleDashed className="h-4 w-4" />} hint="Still being developed" />
         <StatCard label="Avg material cost" value={money(stats.avgCost)} tone="primary" icon={<DollarSign className="h-4 w-4" />} hint={stats.costedCount ? `Across ${stats.costedCount} formulas with ingredients` : 'No ingredients yet'} />
       </div>
+
+      {settings.data?.cleaningRequired && (
+        <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <Droplets className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>The nozzle cleaning interval has passed since the last dispense. Users are asked to confirm the nozzle cleaning before the next dispense.</span>
+        </div>
+      )}
 
       {q.isError && <ErrorBanner message={errorMessage(q.error)} />}
 
@@ -208,7 +262,7 @@ export default function FormulasPage() {
             ))}
           </div>
         }
-        toolbarRight={<SearchInput value={search} onChange={setSearch} placeholder="Search formula name, number or customer…" className="w-full sm:w-80" />}
+        toolbarRight={<SearchInput value={search} onChange={setSearch} placeholder="Search by Formula Name, Formula Number or Customer Name" className="w-full sm:w-96" />}
         emptyTitle={filtering ? 'No formulas match these filters' : 'No formulas yet'}
         emptyDescription={filtering ? 'Try another status or search term.' : 'Create your first formulation to track ingredients, cost and VOC content.'}
         emptyAction={
@@ -222,11 +276,19 @@ export default function FormulasPage() {
         }
       />
 
+      <CreateFormulaModal open={createOpen} onClose={() => setCreateOpen(false)} />
       <CopyFormulaModal formula={copyRow} onClose={() => setCopyRow(null)} />
-      <BulkCopyModal open={bulkOpen} ids={selected.map(Number)} onClose={() => setBulkOpen(false)} onDone={() => setSelected([])} />
+      <BulkCopyModal open={bulkOpen} ids={bulkIds} onClose={() => setBulkOpen(false)} onDone={() => setSelected([])} />
+      <PrintDeniedModal open={printDenied} onClose={() => setPrintDenied(false)} />
+      <CleanNozzleModal open={nozzleOpen} onClose={() => setNozzleOpen(false)} groupId={groupId} />
+      <PurgeModal open={purgeOpen} onClose={() => setPurgeOpen(false)} groupId={groupId} />
+      <PurgeHistoryModal open={purgeHistoryOpen} onClose={() => setPurgeHistoryOpen(false)} groupId={groupId} />
       <EntityDocuments
         open={!!docsRow}
-        onClose={() => setDocsRow(null)}
+        onClose={() => {
+          setDocsRow(null)
+          qc.invalidateQueries({ queryKey: ['formulas'] })
+        }}
         entityType="Formula"
         entityId={docsRow?.id ?? 0}
         groupId={docsRow?.groupId ?? groupId}
@@ -238,7 +300,7 @@ export default function FormulasPage() {
         onClose={() => setDeleteRow(null)}
         busy={remove.isPending}
         onConfirm={() => deleteRow && remove.mutate(deleteRow.id)}
-        message={`Are you sure you want to delete the "${deleteRow?.name ?? ''}" formula?`}
+        message={`Are you sure you want to delete the Formula "${deleteRow?.number ? `${deleteRow.number} - ` : ''}${deleteRow?.name ?? ''}"?`}
       />
     </>
   )
