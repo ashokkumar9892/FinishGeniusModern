@@ -101,7 +101,10 @@ Production is the old site's database used as-is (`"Legacy": true`, mapping in `
 
 - Connected so far: sign-in, groups, users, profile, DPM Center, material categories, departments, vendors, locations,
   Equipment & Materials (list, inventory, reorder / purchase orders, order history), environmental report, bulk
-  import, formulas (list and editor), and the documents library.
+  import, formulas (list and editor), the documents library, and the dashboard (KPIs, departments, devices, processes).
+- Dashboard: runs come from `MyWorkExecution` (group = the schedule's group, completion = the last checklist entry);
+  a device's "last seen" is its newest telemetry reading of the past day (`DeviceMetrics` is indexed by time only).
+  Legacy departments belong to My Work processes, not schedules, so all schedules show under "Unassigned".
 - Stock uses the old batches: `MaterialBatches.BatchQty` is the on-hand quantity and `MaterialQuantityChanges` the
   history, written exactly like the old site (add to a batch = new quantity + change row; new batch = quantity only).
 - A formula is its own material row (`dbo.Materials`, Discriminator `Formulation`); no separate "mirror" row is made.

@@ -41,6 +41,7 @@ public static partial class LegacyModel
         Devices(b);
         PurchaseOrders(b);
         MaterialsAndFormulas(b);
+        MyWorkAndTelemetry(b);
     }
 
     // ------------------------------------------------------------------ groups, users
@@ -354,12 +355,16 @@ public static partial class LegacyModel
         b.Entity<Device>(e =>
         {
             e.ToTable("Devices", "dbo");
+            // Last seen = newest reading of the past day (DeviceMetrics is indexed by time, not by device), in UTC;
+            // older readings show as "not seen recently".
             e.ToSqlQuery("""
                 SELECT d.ID, d.GroupId, d.Name, d.Description,
                        CASE WHEN d.DeviceTypeID BETWEEN 1 AND 7 THEN d.DeviceTypeID ELSE 1 END AS DeviceTypeID,
                        d.NetworkBridgeDeviceId, d.IPAddress, d.ApiKey, d.IsArchived,
-                       CAST(NULL AS datetime) AS LastSeenAt, CAST('2000-01-01' AS datetime) AS CreatedAt
+                       DATEADD(minute, DATEDIFF(minute, GETDATE(), GETUTCDATE()), ls.LastSeen) AS LastSeenAt, CAST('2000-01-01' AS datetime) AS CreatedAt
                 FROM dbo.Devices d
+                LEFT JOIN (SELECT m.DeviceID, MAX(m.[DateTime]) AS LastSeen FROM dbo.DeviceMetrics m
+                           WHERE m.[DateTime] >= DATEADD(day, -1, GETDATE()) GROUP BY m.DeviceID) ls ON ls.DeviceID = d.ID
                 """);
             e.Property(x => x.Id).HasColumnName("ID");
             e.Property(x => x.DeviceType).HasColumnName("DeviceTypeID");
