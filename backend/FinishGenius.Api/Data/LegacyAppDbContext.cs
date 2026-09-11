@@ -9,6 +9,15 @@ namespace FinishGenius.Api.Data;
 /// </summary>
 public class LegacyAppDbContext(DbContextOptions<AppDbContext> options, Func<int> currentUserId, string label) : AppDbContext(options)
 {
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        // The old tables are mostly unindexed. Loading collections in separate queries lets SQL Server filter each one by
+        // its parents' keys instead of joining whole tables (a step's values: ~9 s as one query on Prod).
+        new Microsoft.EntityFrameworkCore.Infrastructure.SqlServerDbContextOptionsBuilder(optionsBuilder)
+            .UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery);
+    }
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);

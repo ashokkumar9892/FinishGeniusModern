@@ -39,14 +39,30 @@ public partial class MyWorkController(AppDbContext db, CurrentUser me, AuditServ
     {
         await me.EnsureGroupAsync(groupId);
         var q = db.WorkExecutions.AsNoTracking().Where(e => e.GroupId == groupId);
+        ExecutionStatus? filter = null;
         if (!string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
         {
             var s = Enum.TryParse<ExecutionStatus>(status, true, out var parsed) ? parsed : ExecutionStatus.InProgress;
+            if (s == ExecutionStatus.Cancelled && db is LegacyAppDbContext) return Ok(Array.Empty<object>()); // cancelled runs are deleted there
+            filter = s;
             q = q.Where(e => e.Status == s);
         }
-        var rows = await q
-            .OrderBy(e => e.Ordering).ThenBy(e => e.Id)
-            .Select(e => new
+        var ordered = q.OrderBy(e => e.Ordering).ThenBy(e => e.Id);
+        // On the old database the counts and completion times come from one batch for all listed runs
+        // (LegacyModel.RunSummariesAsync): per-run subqueries there cost close to a minute for a 600-run list on Prod.
+        var legacy = db is LegacyAppDbContext;
+        var rows = legacy
+            ? await ordered.Select(e => new
+            {
+                e.Id, e.GroupId, GroupName = e.Group!.Name, e.ScheduleId, ScheduleName = e.Schedule!.Name,
+                ScheduleNumber = e.Schedule.Number, e.UserId, UserName = e.User!.Username, e.StartedAt, CompletedAt = (DateTime?)null,
+                Status = (int)e.Status, e.Ordering,
+                TotalLines = 0,
+                CheckedLines = 0,
+                DefectCount = 0,
+                AdderCount = 0,
+            }).Take(2000).ToListAsync()
+            : await ordered.Select(e => new
             {
                 e.Id, e.GroupId, GroupName = e.Group!.Name, e.ScheduleId, ScheduleName = e.Schedule!.Name,
                 ScheduleNumber = e.Schedule.Number, e.UserId, UserName = e.User!.Username, e.StartedAt, e.CompletedAt,
@@ -55,16 +71,25 @@ public partial class MyWorkController(AppDbContext db, CurrentUser me, AuditServ
                 CheckedLines = e.Lines.Count(l => l.Checks.Any()),
                 DefectCount = db.WorkExecutionDefects.Count(d => d.ExecutionId == e.Id),
                 AdderCount = db.WorkExecutionAdders.Count(a => a.ExecutionId == e.Id),
-            })
-            .Take(2000)
-            .ToListAsync();
-        return Ok(rows.Select(r => new
+            }).Take(2000).ToListAsync();
+        var summaries = legacy ? await LegacyModel.RunSummariesAsync(db, groupId, filter) : null;
+        return Ok(rows.Select(r =>
         {
-            r.Id, r.GroupId, r.GroupName, r.ScheduleId, r.ScheduleName, r.ScheduleNumber, r.UserId, r.UserName,
-            r.StartedAt, r.CompletedAt, r.Status, StatusLabel = ((ExecutionStatus)r.Status).ToString(), r.Ordering,
-            r.TotalLines, r.CheckedLines,
-            Progress = r.TotalLines == 0 ? 0 : (int)Math.Round(100.0 * r.CheckedLines / r.TotalLines),
-            r.DefectCount, r.AdderCount,
+            var sum = summaries?.GetValueOrDefault(r.Id);
+            var total = summaries == null ? r.TotalLines : sum?.Total ?? 0;
+            var done = summaries == null ? r.CheckedLines : sum?.Checked ?? 0;
+            // Old runs have no completion time: a completed run ends at its last checklist entry.
+            var completedAt = summaries == null ? r.CompletedAt
+                : r.Status == (int)ExecutionStatus.Completed ? sum?.LastDate ?? r.StartedAt : null;
+            return new
+            {
+                r.Id, r.GroupId, r.GroupName, r.ScheduleId, r.ScheduleName, r.ScheduleNumber, r.UserId, r.UserName,
+                r.StartedAt, CompletedAt = completedAt, r.Status, StatusLabel = ((ExecutionStatus)r.Status).ToString(), r.Ordering,
+                TotalLines = total, CheckedLines = done,
+                Progress = total == 0 ? 0 : (int)Math.Round(100.0 * done / total),
+                DefectCount = summaries == null ? r.DefectCount : sum?.Defects ?? 0,
+                AdderCount = summaries == null ? r.AdderCount : sum?.Adders ?? 0,
+            };
         }));
     }
 
@@ -77,8 +102,12 @@ public partial class MyWorkController(AppDbContext db, CurrentUser me, AuditServ
         await me.EnsureGroupAsync(schedule.GroupId);
         if (schedule.IsArchived) throw ApiException.Bad("This process schedule is archived and cannot be started.");
 
-        var lines = await calculator.BuildChecklistAsync(schedule.Id);
-        if (lines.Count == 0) throw ApiException.Bad("This process schedule has no steps. Add steps to the schedule before starting it.");
+        // On the old database the checklist is the My Work processes of the schedule's steps, created with the run.
+        var legacy = db is LegacyAppDbContext;
+        List<WorkExecutionLine> lines = legacy ? [] : await calculator.BuildChecklistAsync(schedule.Id);
+        if (legacy && await LegacyModel.MyWorkProcessCountAsync(db, schedule.Id) == 0)
+            throw ApiException.Bad("No active My Work process is set up for the steps of this process schedule.");
+        if (!legacy && lines.Count == 0) throw ApiException.Bad("This process schedule has no steps. Add steps to the schedule before starting it.");
 
         var maxOrdering = await db.WorkExecutions.Where(e => e.GroupId == schedule.GroupId).MaxAsync(e => (int?)e.Ordering) ?? 0;
         var execution = new WorkExecution
@@ -94,7 +123,8 @@ public partial class MyWorkController(AppDbContext db, CurrentUser me, AuditServ
         db.WorkExecutions.Add(execution);
         await db.SaveChangesAsync();
 
-        audit.Log(Entity, execution.Id, "Started", $"Process \"{schedule.Name}\" (#{schedule.Number}) started with {lines.Count} checklist lines.", schedule.GroupId);
+        var lineCount = legacy ? (await LegacyModel.RunSummaryAsync(db, execution.Id)).Total : lines.Count;
+        audit.Log(Entity, execution.Id, "Started", $"Process \"{schedule.Name}\" (#{schedule.Number}) started with {lineCount} checklist lines.", schedule.GroupId);
         await db.SaveChangesAsync();
         return Ok(new { message = "Process started.", id = execution.Id });
     }
@@ -112,14 +142,14 @@ public partial class MyWorkController(AppDbContext db, CurrentUser me, AuditServ
             }).FirstOrDefaultAsync() ?? throw ApiException.NotFound("Process");
         await me.EnsureGroupAsync(e.GroupId);
 
-        var lines = await db.WorkExecutionLines.AsNoTracking().Where(l => l.ExecutionId == id)
-            .OrderBy(l => l.StepNumber).ThenBy(l => l.Sequence).ThenBy(l => l.Id)
-            .Select(l => new
-            {
-                l.Id, l.StepNumber, l.StepName, l.Sequence, l.Description, l.Value, l.Unit, l.MinValue, l.MaxValue,
-                Checks = l.Checks.OrderBy(c => c.CheckedAt).ThenBy(c => c.Id)
-                    .Select(c => new { c.Id, c.UserId, c.UserName, c.CheckedAt, c.RecordedValue }).ToList(),
-            }).ToListAsync();
+        var lines = db is LegacyAppDbContext
+            ? await LegacyChecklistAsync(id)
+            : await db.WorkExecutionLines.AsNoTracking().Where(l => l.ExecutionId == id)
+                .OrderBy(l => l.StepNumber).ThenBy(l => l.Sequence).ThenBy(l => l.Id)
+                .Select(l => new ChecklistLine(l.Id, l.StepNumber, l.StepName, l.Sequence, l.Description, l.Value, l.Unit, l.MinValue, l.MaxValue,
+                    l.Checks.OrderBy(c => c.CheckedAt).ThenBy(c => c.Id)
+                        .Select(c => new ChecklistCheck(c.Id, c.UserId, c.UserName, c.CheckedAt, c.RecordedValue)).ToList()))
+                .ToListAsync();
 
         var defectCount = await db.WorkExecutionDefects.CountAsync(d => d.ExecutionId == id);
         var adderCount = await db.WorkExecutionAdders.CountAsync(a => a.ExecutionId == id);
@@ -146,11 +176,31 @@ public partial class MyWorkController(AppDbContext db, CurrentUser me, AuditServ
         });
     }
 
+    private sealed record ChecklistCheck(int Id, int UserId, string? UserName, DateTime CheckedAt, string? RecordedValue);
+    private sealed record ChecklistLine(int Id, int StepNumber, string StepName, int Sequence, string Description, string? Value, string? Unit,
+        decimal? MinValue, decimal? MaxValue, List<ChecklistCheck> Checks);
+
+    /// <summary>The old database's checklist, read with queries that filter by the run first (see LegacyModel.RunLinesAsync).</summary>
+    private async Task<List<ChecklistLine>> LegacyChecklistAsync(int id)
+    {
+        var lines = await LegacyModel.RunLinesAsync(db, id);
+        var checks = (await LegacyModel.RunChecksAsync(db, id)).ToLookup(c => c.LineId);
+        return lines.OrderBy(l => l.StepNumber).ThenBy(l => l.Sequence).ThenBy(l => l.Id)
+            .Select(l => new ChecklistLine(l.Id, l.StepNumber, l.StepName, l.Sequence, l.Description, l.Value, l.Unit, l.MinValue, l.MaxValue,
+                checks[l.Id].OrderBy(c => c.CheckedAt).ThenBy(c => c.Id)
+                    .Select(c => new ChecklistCheck(c.Id, c.UserId, c.UserName, c.CheckedAt, c.RecordedValue)).ToList()))
+            .ToList();
+    }
+
+    private async Task<WorkExecutionLine?> FindLineAsync(int lineId) => db is LegacyAppDbContext
+        ? await LegacyModel.RunLineAsync(db, lineId)
+        : await db.WorkExecutionLines.FirstOrDefaultAsync(l => l.Id == lineId);
+
     /// <summary>POST /api/my-work/lines/{lineId}/check { recordedValue? } — stamps the line with date/time + user.</summary>
     [HttpPost("lines/{lineId:int}/check")]
     public async Task<IActionResult> Check(int lineId, [FromBody] CheckLineRequest? req)
     {
-        var line = await db.WorkExecutionLines.FirstOrDefaultAsync(l => l.Id == lineId) ?? throw ApiException.NotFound("Checklist line");
+        var line = await FindLineAsync(lineId) ?? throw ApiException.NotFound("Checklist line");
         var execution = await LoadEditableAsync(line.ExecutionId);
 
         var recorded = Text.Clean(req?.RecordedValue);
@@ -182,7 +232,7 @@ public partial class MyWorkController(AppDbContext db, CurrentUser me, AuditServ
     public async Task<IActionResult> Uncheck(int checkId)
     {
         var check = await db.WorkLineChecks.FirstOrDefaultAsync(c => c.Id == checkId) ?? throw ApiException.NotFound("Check");
-        var line = await db.WorkExecutionLines.FirstAsync(l => l.Id == check.LineId);
+        var line = await FindLineAsync(check.LineId) ?? throw ApiException.NotFound("Checklist line");
         var execution = await LoadEditableAsync(line.ExecutionId);
         if (check.UserId != me.Id && !me.IsAdmin)
             throw new ApiException(StatusCodes.Status403Forbidden, "You can only undo your own checks.");
@@ -200,22 +250,39 @@ public partial class MyWorkController(AppDbContext db, CurrentUser me, AuditServ
     {
         var execution = await LoadEditableAsync(id);
         var group = await db.Groups.AsNoTracking().FirstAsync(g => g.Id == execution.GroupId);
-        var total = await db.WorkExecutionLines.CountAsync(l => l.ExecutionId == id);
-        var done = await db.WorkExecutionLines.CountAsync(l => l.ExecutionId == id && l.Checks.Any());
+        int total, done;
+        if (db is LegacyAppDbContext)
+        {
+            var summary = await LegacyModel.RunSummaryAsync(db, id);
+            (total, done) = (summary.Total, summary.Checked);
+        }
+        else
+        {
+            total = await db.WorkExecutionLines.CountAsync(l => l.ExecutionId == id);
+            done = await db.WorkExecutionLines.CountAsync(l => l.ExecutionId == id && l.Checks.Any());
+        }
 
         execution.Status = ExecutionStatus.Completed;
         execution.CompletedAt = DateTime.UtcNow;
         var details = $"Process completed with {done} of {total} lines checked.";
-        if (group.ChecklistDeletionEnabled)
+        var legacy = db is LegacyAppDbContext;
+        if (group.ChecklistDeletionEnabled && !legacy)
         {
             // "Enable Checklist Deletion on Submit": keep the lines, clear the marks.
             var checks = await db.WorkLineChecks.Where(c => db.WorkExecutionLines.Any(l => l.Id == c.LineId && l.ExecutionId == id)).ToListAsync();
             db.WorkLineChecks.RemoveRange(checks);
             details += $" Checklist marks cleared ({checks.Count}) — group setting \"Enable Checklist Deletion on Submit\".";
         }
+        else if (group.ChecklistDeletionEnabled && await LegacyModel.ScheduleDeletionEnabledAsync(db, execution.ScheduleId))
+        {
+            // The old site's version of the setting: the submitted run's schedule becomes inactive (when the schedule allows it).
+            var schedule = await db.ProcessSchedules.FirstAsync(s => s.Id == execution.ScheduleId);
+            schedule.IsArchived = true;
+            details += " Process schedule archived — group setting \"Enable Checklist Deletion on Submit\".";
+        }
         audit.Log(Entity, id, "Completed", details, execution.GroupId);
         await db.SaveChangesAsync();
-        return Ok(new { message = "Process completed.", checklistCleared = group.ChecklistDeletionEnabled });
+        return Ok(new { message = "Process completed.", checklistCleared = group.ChecklistDeletionEnabled && !legacy });
     }
 
     /// <summary>POST /api/my-work/executions/{id}/cancel</summary>
@@ -223,6 +290,14 @@ public partial class MyWorkController(AppDbContext db, CurrentUser me, AuditServ
     public async Task<IActionResult> Cancel(int id)
     {
         var execution = await LoadEditableAsync(id);
+        if (db is LegacyAppDbContext)
+        {
+            // The old database has no cancelled state: like the old site's "Remove", the run and its entries are deleted.
+            db.WorkExecutions.Remove(execution);
+            audit.Log(Entity, id, "Cancelled", "Process cancelled and removed.", execution.GroupId);
+            await db.SaveChangesAsync();
+            return Ok(new { message = "Process cancelled and removed." });
+        }
         execution.Status = ExecutionStatus.Cancelled;
         execution.CompletedAt = DateTime.UtcNow;
         audit.Log(Entity, id, "Cancelled", "Process cancelled.", execution.GroupId);

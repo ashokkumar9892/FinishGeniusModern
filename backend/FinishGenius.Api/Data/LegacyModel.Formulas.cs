@@ -415,7 +415,7 @@ public static partial class LegacyModel
                 break;
 
             default:
-                return false;
+                return VirtualProcess(db, entry, userId, label, side);
         }
         entry.State = EntityState.Detached;
         return true;

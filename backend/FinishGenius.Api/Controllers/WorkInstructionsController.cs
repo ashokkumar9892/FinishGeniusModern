@@ -193,8 +193,13 @@ public class WorkInstructionsController(AppDbContext db, CurrentUser me, AuditSe
     public async Task<IActionResult> Delete(int id)
     {
         var w = await LoadAsync(id);
-        w.IsDeleted = true;
-        w.UpdatedAt = DateTime.UtcNow;
+        if (db is LegacyAppDbContext)
+            db.WorkInstructions.Remove(w); // no deleted flag on the old table: removed with its contents, like the old site's delete
+        else
+        {
+            w.IsDeleted = true;
+            w.UpdatedAt = DateTime.UtcNow;
+        }
         audit.Log(Entity, w.Id, "Deleted", $"#{w.DocumentNumber} {w.Name}", w.GroupId);
         await db.SaveChangesAsync();
         return Ok(new { message = "Work instruction deleted." });
@@ -272,6 +277,8 @@ public class WorkInstructionsController(AppDbContext db, CurrentUser me, AuditSe
     {
         var (step, w) = await LoadStepAsync(stepId);
         if (uploads == null || uploads.Count == 0) throw ApiException.Bad("Please select a file to upload.");
+        if (db is LegacyAppDbContext && step.Media.Count + uploads.Count > 3)
+            throw ApiException.Bad($"A step can hold 3 files on this database ({step.Media.Count} already attached).");
 
         var folder = MediaFolder(w.GroupId);
         // Reject the whole batch before anything is written. SaveAsync throws the exact legacy message for a bad extension
@@ -327,11 +334,14 @@ public class WorkInstructionsController(AppDbContext db, CurrentUser me, AuditSe
     {
         var w = await LoadAsync(id);
         var steps = await db.WorkInstructionSteps.Where(s => s.WorkInstructionId == id).OrderBy(s => s.Level).ThenBy(s => s.Id).ToListAsync();
+        // Old-database sub steps (1.1, 1.2 …) share their parent's level there: number the levels, not the rows.
+        var levels = steps.Select(s => s.Level).Distinct().ToList();
         var changed = false;
         for (var i = 0; i < steps.Count; i++)
         {
-            if (steps[i].Level == i + 1) continue;
-            steps[i].Level = i + 1;
+            var level = db is LegacyAppDbContext ? levels.IndexOf(steps[i].Level) + 1 : i + 1;
+            if (steps[i].Level == level) continue;
+            steps[i].Level = level;
             changed = true;
         }
         if (!changed) return Ok(new { message = "Steps are already numbered in order." });

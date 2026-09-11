@@ -22,9 +22,10 @@ public class FilesController(FileStorage files, CurrentUser me) : ControllerBase
         if (parts.Length >= 3 && int.TryParse(parts[1], out var groupId) && parts[0] != "logos")
             await me.EnsureGroupAsync(groupId);
 
-        var full = files.Resolve(path);
-        if (!System.IO.File.Exists(full)) return NotFound(new { message = "File not found." });
-        var type = FileStorage.ContentTypeFor(full);
+        // Under Storage:Root, or (old site's files) under Storage:LegacyRoot.
+        var full = files.ResolveExisting(path);
+        if (full == null) return NotFound(new { message = "File not found." });
+        var type = FileStorage.ContentTypeOf(full);
         var stream = System.IO.File.OpenRead(full);
         var asDownload = download is not null && (download == "1" || download.Equals("true", StringComparison.OrdinalIgnoreCase));
         if (!asDownload) return File(stream, type, enableRangeProcessing: true);

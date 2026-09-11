@@ -3,6 +3,7 @@ using FinishGenius.Api.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace FinishGenius.Api.Data;
 
@@ -42,6 +43,9 @@ public static partial class LegacyModel
         PurchaseOrders(b);
         MaterialsAndFormulas(b);
         MyWorkAndTelemetry(b);
+        PhotoGallery(b);
+        Processes(b);
+        WorkInstructionTables(b);
     }
 
     // ------------------------------------------------------------------ groups, users
@@ -324,14 +328,18 @@ public static partial class LegacyModel
         e.ToTable("FinishingSchedules", "dbo");
         e.ToSqlQuery("""
             SELECT sc.ID, sc.GroupID, ISNULL(NULLIF(LTRIM(RTRIM(sc.Name)), ''), CONCAT('Schedule ', sc.ID)) AS Name,
-                   ISNULL(LTRIM(RTRIM(sc.Number)), '') AS Number, sc.CustomerName, CAST(NULL AS int) AS DepartmentId, CAST(0 AS bit) AS IsArchived,
+                   ISNULL(LTRIM(RTRIM(sc.Number)), '') AS Number, sc.CustomerName, dp.DepartmentId, sc.Status,
                    CAST('2000-01-01' AS datetime) AS CreatedAt, CAST(NULL AS datetime) AS UpdatedAt,
                    ISNULL(sc.OneSidedArea, 0) AS OneSidedArea, ISNULL(sc.TwoSidedArea, 0) AS TwoSidedArea, ISNULL(sc.LaborRate, 0) AS LaborRate,
                    ISNULL(sc.MarkUp, 0) AS MarkUp, ISNULL(sc.PremiumMarkUp, 0) AS PremiumMarkUp, ISNULL(sc.OneSided, 0) AS OneSided,
                    ISNULL(sc.OneSidedArea, 0) AS OneSidedPriceArea, ISNULL(sc.TwoSided, 0) AS TwoSided, ISNULL(sc.TwoSidedArea, 0) AS TwoSidedPriceArea,
                    ISNULL(sc.Complexity, 0) AS Complexity, ISNULL(sc.HighComplexityArea, 0) AS HighComplexityArea, ISNULL(sc.TotalJobPrice, 0) AS TotalJobPrice,
-                   sc.Status, sc.DeletionEnabled
+                   sc.DeletionEnabled
             FROM dbo.FinishingSchedules sc
+            LEFT JOIN (SELECT st.FinishingScheduleID, p.GroupID, MIN(p.DepartmentID) AS DepartmentId
+                       FROM dbo.FinishingSchedulesSteps st JOIN dbo.MyWorkProcess p ON p.FinishingStepID = st.FinishingStepID
+                       WHERE p.Status = 1 AND p.DepartmentID IS NOT NULL
+                       GROUP BY st.FinishingScheduleID, p.GroupID) dp ON dp.FinishingScheduleID = sc.ID AND dp.GroupID = sc.GroupID
             """);
         e.Property(x => x.Id).HasColumnName("ID");
         e.Property(x => x.GroupId).HasColumnName("GroupID");
@@ -340,11 +348,13 @@ public static partial class LegacyModel
         e.Property(x => x.HighComplexity).HasColumnName("Complexity");
         ReadOnly(e.Property(x => x.OneSidedPriceArea));  // same stored column as OneSidedArea
         ReadOnly(e.Property(x => x.TwoSidedPriceArea));  // same stored column as TwoSidedArea
-        ReadOnly(e.Property(x => x.DepartmentId));       // legacy departments belong to My Work processes, not schedules
-        ReadOnly(e.Property(x => x.IsArchived));
+        // Departments belong to the schedule's My Work processes in the old site: read from them, assigned there.
+        e.Property(x => x.DepartmentId).HasAnnotation(Unsupported, "Assigning a department to a schedule (departments belong to My Work processes there)");
+        ReadOnly(e.Property(x => x.DepartmentId));
+        // Status 1 = active, 0 = inactive (deleted in the old site) = archived here.
+        e.Property(x => x.IsArchived).HasColumnName("Status").HasConversion(new ValueConverter<bool, int>(v => v ? 0 : 1, v => v == 0));
         ReadOnly(e.Property(x => x.CreatedAt));
         ReadOnly(e.Property(x => x.UpdatedAt));
-        e.Property<int>("Status").HasAnnotation(InsertValue, 0);
         e.Property<bool>("DeletionEnabled").HasAnnotation(InsertValue, false);
     });
 
@@ -438,8 +448,11 @@ public static partial class LegacyModel
     public static List<SideWrite> BeforeSave(DbContext db, int currentUserId, string label)
     {
         var side = new List<SideWrite>();
+        // Step values first: they take their old-table columns from their entry before entries are detached.
+        // Work instructions before their trail: a new version row must exist before the trail is appended to it.
         var entries = db.ChangeTracker.Entries()
-            .Where(x => x.State is EntityState.Added or EntityState.Modified or EntityState.Deleted).ToList();
+            .Where(x => x.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            .OrderBy(x => x.Entity switch { ProcessStepValue => 0, WorkInstruction => 1, _ => 2 }).ToList();
         var autoDetect = db.ChangeTracker.AutoDetectChangesEnabled;
         db.ChangeTracker.AutoDetectChangesEnabled = false; // entries are detached below; don't let fix-up re-add them mid-loop
         try
@@ -449,9 +462,15 @@ public static partial class LegacyModel
                 if (entry.Metadata.FindAnnotation(ReadOnlyEntity)?.Value is string what)
                     throw new ApiException(StatusCodes.Status409Conflict, $"{what} isn't available on the {label} database yet.");
                 if (Virtual(db, entry, currentUserId, label, side)) continue;
-                if (entry.State == EntityState.Deleted) continue;
+                if (entry.State == EntityState.Deleted)
+                {
+                    Deleting(entry, side);
+                    continue;
+                }
                 Related(entry, side);
-                Fill(db, entry, currentUserId);
+                RelatedProcess(entry, side);
+                Fill(db, entry, currentUserId, label);
+                RelatedShopFloor(entry, currentUserId, side); // after Fill: uses the old-table columns Fill sets
             }
         }
         finally
@@ -461,8 +480,14 @@ public static partial class LegacyModel
         return side;
     }
 
-    private static void Fill(DbContext db, Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry, int currentUserId)
+    private static void Fill(DbContext db, Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry, int currentUserId, string label)
     {
+        foreach (var p in entry.Properties)
+            if (p.Metadata.FindAnnotation(Unsupported)?.Value is string what && entry.State == EntityState.Modified
+                && p.IsModified && !Equals(p.CurrentValue, p.OriginalValue))
+                throw new ApiException(StatusCodes.Status409Conflict, $"{what} isn't available on the {label} database yet.");
+        FillProcess(db, entry);
+        FillShopFloor(db, entry, currentUserId);
         {
             if (entry.State == EntityState.Added)
             {
@@ -473,6 +498,9 @@ public static partial class LegacyModel
                 {
                     case PurchaseOrderLine line:
                         entry.Property("GroupID").CurrentValue = OrderGroupId(db, line);
+                        break;
+                    case PhotoTag tag:
+                        entry.Property("GroupID").CurrentValue = PhotoGroupId(db, tag);
                         break;
                     case FormulaDispenseSnapshot s:
                         entry.Property("ColourID").CurrentValue = db.ChangeTracker.Entries<FormulaIngredient>()

@@ -88,7 +88,7 @@ Put this file in the site folder (`C:\inetpub\FinishGenius`). Start from `appset
 {
   "Databases": {
     "Dev":  { "Label": "Development", "ConnectionString": "Server=SQL_SERVER;Database=DEV_DB;User Id=USER;Password=PASSWORD;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15", "AutoMigrate": true },
-    "Prod": { "Label": "Production",  "ConnectionString": "Server=SQL_SERVER;Database=PROD_DB;User Id=USER;Password=PASSWORD;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15", "AutoMigrate": false, "Production": true }
+    "Prod": { "Label": "Production",  "ConnectionString": "Server=SQL_SERVER;Database=PROD_DB;User Id=USER;Password=PASSWORD;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15", "AutoMigrate": false, "Production": true, "Legacy": true }
   },
   "Database": { "Default": "Dev" },
   "Jwt":      { "Key": "LONG-RANDOM-SECRET-AT-LEAST-32-CHARS" },
@@ -98,7 +98,7 @@ Put this file in the site folder (`C:\inetpub\FinishGenius`). Start from `appset
 
 | Setting | Meaning |
 |---|---|
-| `Databases:<key>` | Each database users can sign in to. `AutoMigrate: true` creates/updates the `fg` schema on startup. `Production: true` shows a "live data" warning in the UI. |
+| `Databases:<key>` | Each database users can sign in to. `AutoMigrate: true` creates/updates the `fg` schema on startup. `Production: true` shows a "live data" warning in the UI. `Legacy: true` uses the old Finish Genius database as-is (the old site's `dbo` tables, shared with the old site; never migrated) — required for Production. |
 | `Database:Default` | Which database is used when none is chosen. |
 | `Jwt:Key` | Secret that signs login tokens. Keep it the same across deploys, or every user is logged out. |
 | `Seed:AdminPassword` | Initial `admin` password. Only used when the database has no users yet. |

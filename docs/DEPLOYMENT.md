@@ -77,7 +77,7 @@ Browse to `http://<VM external IP>/` and sign in (`admin` / the `Seed:AdminPassw
   "Jwt": { "Key": "<long random secret, 32+ chars — keep the same value across servers/restarts>" },
   "Seed": { "AdminPassword": "<initial admin password, used only when no users exist>" },
   "Database": { "Default": "Dev", "AutoMigrate": true, "SeedDemoData": false },
-  "Storage": { "Root": "" }
+  "Storage": { "Root": "D:\\FinishGeniusData", "LegacyRoot": "" }
 }
 ```
 
@@ -85,11 +85,12 @@ Browse to `http://<VM external IP>/` and sign in (`admin` / the `Seed:AdminPassw
 |---|---|
 | `Databases:<Key>` | Databases offered on the sign-in page (only shown when there are 2+). `Label` is what users see, `Production: true` adds the live-data warning and an amber header badge. A lone `ConnectionStrings:Default` still works (one "Dev" database). |
 | `Databases:<Key>:AutoMigrate` | Create/update that database's `fg` schema on startup (default = `Database:AutoMigrate`; always off for `Legacy` databases). |
-| `Databases:<Key>:Legacy` | `true` = use the old Finish Genius database as-is: the app reads and writes the old `dbo` tables directly (shared with the old site, which keeps working; passwords are stored as bcrypt so both sites accept them). It never creates `fg` tables and is never migrated. Screens not connected to the old tables yet show a message. Mapping: `Data/LegacyModel.cs`. Prod is configured this way. |
+| `Databases:<Key>:Legacy` | `true` = use the old Finish Genius database as-is: the app reads and writes the old `dbo` tables directly (shared with the old site, which keeps working; passwords are stored as bcrypt so both sites accept them). It never creates `fg` tables and is never migrated. Features the old tables cannot hold are refused with a message. Mapping: `Data/LegacyModel*.cs`. Prod is configured this way. |
 | `Database:Default` | Database used when none is chosen (and by the command-line tools without `--db`). |
 | `Database:AutoMigrate` | `true` = the app creates/updates the `fg` schema on startup. Set `false` if a DBA runs `FinishGenius_schema.sql` (idempotent) instead. |
 | `Database:SeedDemoData` | Default `false`. `true` creates an "AWFI Demo Group" with sample data (for a brand-new, empty database). |
-| `Storage:Root` | Upload folder. Empty = `<site>\App_Data\uploads`. Can be a larger disk, e.g. `D:\FinishGeniusData`. Back it up. |
+| `Storage:Root` | Where the app keeps every uploaded file (documents, photos, work-instruction media, logos). Empty = `<site>\App_Data\uploads`. Recommended: a folder outside the site, e.g. `D:\FinishGeniusData`, so redeploying the site never touches the files. Back it up. |
+| `Storage:LegacyRoot` | Optional, read only: the old site's `AppData` folder (a share such as `\\oldserver\FinishGenius\AppData`, or a copy). Old documents, photos and work-instruction pictures are read from there in place (`Documents\{group}`, `PhotoGalleryPhotos\{group}`, `WorkInstructions\{group}\{document}`); nothing is written or deleted there. The app-pool identity needs Read on it. |
 | `Jwt:ExpiryHours` / `RememberMeDays` | Session lifetime. |
 
 A different database: change `Database=` in the connection string — the schema is created automatically (the SQL login
@@ -99,9 +100,26 @@ needs `db_owner`, or `db_ddladmin` + read/write for migrations).
 
 Production is the old site's database used as-is (`"Legacy": true`, mapping in `Data/LegacyModel*.cs`):
 
-- Connected so far: sign-in, groups, users, profile, DPM Center, material categories, departments, vendors, locations,
+- Connected: sign-in, groups, users, profile, DPM Center, material categories, departments, vendors, locations,
   Equipment & Materials (list, inventory, reorder / purchase orders, order history), environmental report, bulk
-  import, formulas (list and editor), the documents library, and the dashboard (KPIs, departments, devices, processes).
+  import, formulas (list and editor), the documents library, the dashboard, sub steps, process steps, the step
+  builder, process schedules and the schedule editor, material quantities, pricing, Photo Gallery, work instructions
+  (list and document) and My Work (runs, checklist, defects, adders, processes tab).
+- Process schedules: allowed ranges for schedule values and assigning a department to a schedule are refused (the old
+  site keeps ranges per My Work metric and departments per My Work process).
+- Work instructions: the edit trail is `WorkInstructionsVersions` (one row per version; new entries are appended to the
+  latest version's log). Releasing names the latest version "Issue A", "Issue B", …; changing a released document
+  starts a "DRAFT vN" version and moves its contents to it, as the old site does. Deleting removes the document and
+  its contents (the old table has no "deleted" flag). A step holds at most 3 files; document number, tools, materials,
+  related documents and signatures hold 50 characters; a step's details are appended to its text; links from a
+  material line to a material are not stored (only its text).
+- My Work: "Start Process" creates one executed process per active My Work process of the schedule's steps (latest
+  version), and the checklist is those processes' lines; a recorded value goes to the line's first input. Cancelling
+  removes the run (the old database has no cancelled state, like the old site's "Remove"). Defects and adders are
+  recorded on the run's first process that has the type set up; defect notes are not stored. With "Enable Checklist
+  Deletion on Submit" completing a run archives its schedule (old site behaviour) instead of clearing the marks.
+- The My Work run screens read the checklist with run-filtered SQL (`LegacyModel.RunLinesAsync` and friends): the old
+  tables have no indexes, and Prod's tempdb is small (~340 MB), so avoid ad-hoc joins over whole My Work tables.
 - Dashboard: runs come from `MyWorkExecution` (group = the schedule's group, completion = the last checklist entry);
   a device's "last seen" is its newest telemetry reading of the past day (`DeviceMetrics` is indexed by time only).
   Legacy departments belong to My Work processes, not schedules, so all schedules show under "Unassigned".
@@ -111,9 +129,12 @@ Production is the old site's database used as-is (`"Legacy": true`, mapping in `
 - Ingredients keep the order they were added in (the old tables have no ordering column).
 - Sending jobs to dispense machines, scales and label printers, and changing purge settings, are refused with a
   message: those devices are connected to the old site.
-- Old document files live on the old server; copy `AppData/Documents/{group}/` to
-  `<Storage:Root>/documents/{group}/legacy/` to preview them here. Files uploaded here are stored by this app, so the
-  old site cannot open them.
+- Old files (documents, photos, work-instruction pictures) are read in place from the old site's `AppData` folder when
+  `Storage:LegacyRoot` points at it (a share such as `\\oldserver\FinishGenius\AppData`, or a copy on another drive);
+  nothing is written there. Without it, copy `AppData/Documents/{group}/` to `<Storage:Root>/documents/{group}/legacy/`
+  (likewise `PhotoGalleryPhotos/{group}` → `photos/{group}/legacy`, `WorkInstructions/{group}/{doc}` →
+  `work-instructions/{group}/legacy/{doc}`). Files uploaded here are stored under `Storage:Root`, so the old site cannot
+  open them.
 - Old data contains a few corrupt quantities (up to 10^28 gallons); values that do not fit are shown as 0.
 
 ### Pointing at a different database / importing legacy data

@@ -407,6 +407,9 @@ public class GroupCopyService(AppDbContext db, FileStorage files, CurrentUser me
                 Version = 1, Controlled = w.Controlled, Location = w.Location, Purpose = w.Purpose, Scope = w.Scope, Terminology = w.Terminology,
             };
             copy.Trail.Add(new WorkInstructionTrail { Version = copy.StatusText, Author = me.UserName, Log = $"Copied from #{w.DocumentNumber} {w.Name}" });
+            db.WorkInstructions.Add(copy);
+            // The header first: on the old database the contents point at the document's version row, created with it.
+            await db.SaveChangesAsync();
             foreach (var s in w.Steps.OrderBy(s => s.Level))
             {
                 var step = new WorkInstructionStep { Level = s.Level, Title = s.Title, Body = s.Body };
@@ -422,7 +425,6 @@ public class GroupCopyService(AppDbContext db, FileStorage files, CurrentUser me
                     Kind = i.Kind, Description = i.Description,
                     MaterialId = i.MaterialId == null ? null : await MapMaterialAsync(i.MaterialId.Value, destGroup),
                 });
-            db.WorkInstructions.Add(copy);
         }
         await db.SaveChangesAsync();
         return src.Count;
