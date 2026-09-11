@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   BookOpen, Building2, Calculator, CalendarRange, ChevronsLeft, ChevronsRight, ClipboardCheck, Database, DollarSign, FlaskConical,
-  HelpCircle, Images, KeyRound, Layers, LayoutDashboard, ListOrdered, LogOut, Mail, Menu, Moon, Package, Sun, Tags, Upload, UserCog, Users,
+  HardDrive, HelpCircle, Images, KeyRound, Layers, LayoutDashboard, ListOrdered, LogOut, Mail, Menu, Moon, Package, Sun, Tags, Upload, UserCog, Users,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth, useGroup } from '@/lib/auth'
@@ -51,6 +51,7 @@ export const navSections: { title: string; items: NavItem[] }[] = [
       { to: '/material-categories', label: 'Material Categories', icon: <Tags />, module: 'materialCategories' },
       { to: '/sub-steps', label: 'Sub Step Setup', icon: <Layers />, module: 'subSteps' },
       { to: '/import', label: 'Import', icon: <Upload />, module: 'import' },
+      { to: '/settings', label: 'System Settings', icon: <HardDrive />, module: 'settings' },
     ],
   },
 ]

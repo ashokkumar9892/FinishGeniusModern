@@ -10,6 +10,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Secrets (connection strings, JWT key) live in appsettings.Local.json, which is not committed to git.
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+// File storage folders set by a System Administrator on the System Settings page (kept in App_Data across deployments).
+builder.Configuration.AddJsonFile(FileStorage.SettingsFile, optional: true, reloadOnChange: true);
 
 // The user picks a database (Dev / Prod) on the sign-in page; every request then uses its session's database.
 var databases = new DatabaseCatalog(builder.Configuration);

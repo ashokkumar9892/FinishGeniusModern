@@ -89,7 +89,7 @@ Browse to `http://<VM external IP>/` and sign in (`admin` / the `Seed:AdminPassw
 | `Database:Default` | Database used when none is chosen (and by the command-line tools without `--db`). |
 | `Database:AutoMigrate` | `true` = the app creates/updates the `fg` schema on startup. Set `false` if a DBA runs `FinishGenius_schema.sql` (idempotent) instead. |
 | `Database:SeedDemoData` | Default `false`. `true` creates an "AWFI Demo Group" with sample data (for a brand-new, empty database). |
-| `Storage:Root` | Where the app keeps every uploaded file (documents, photos, work-instruction media, logos). Empty = `<site>\App_Data\uploads`. Recommended: a folder outside the site, e.g. `D:\FinishGeniusData`, so redeploying the site never touches the files. Back it up. |
+| `Storage:Root` | Where the app keeps every uploaded file (documents, photos, work-instruction media, logos). **Normally set in the app: Administration → System Settings** (System Administrators only) — it tests the folder, can copy the existing files over, and saves the choice in `App_Data\storage-settings.json`, which overrides this file and is kept by `Install-IIS.ps1`. Empty = `<site>\App_Data\uploads`. Recommended: a folder outside the site, e.g. `D:\FinishGeniusData`, so redeploying the site never touches the files. Back it up. |
 | `Storage:LegacyRoot` | Optional, read only: the old site's `AppData` folder (a share such as `\\oldserver\FinishGenius\AppData`, or a copy). Old documents, photos and work-instruction pictures are read from there in place (`Documents\{group}`, `PhotoGalleryPhotos\{group}`, `WorkInstructions\{group}\{document}`); nothing is written or deleted there. The app-pool identity needs Read on it. |
 | `Jwt:ExpiryHours` / `RememberMeDays` | Session lifetime. |
 

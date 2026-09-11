@@ -29,6 +29,7 @@ const ExecutionPage = lazy(() => import('@/pages/mywork/ExecutionPage'))
 const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'))
 const WorkInstructionsPage = lazy(() => import('@/pages/workinstructions/WorkInstructionsPage'))
 const WorkInstructionDocPage = lazy(() => import('@/pages/workinstructions/WorkInstructionDocPage'))
+const SystemSettingsPage = lazy(() => import('@/pages/settings/SystemSettingsPage'))
 
 function Guard({ module, children }: { module: ModuleKey; children: ReactNode }) {
   const { me } = useAuth()
@@ -89,6 +90,7 @@ export default function App() {
           <Route path="dashboard" element={g('dashboard', <DashboardPage />)} />
           <Route path="work-instructions" element={g('workInstructions', <WorkInstructionsPage />)} />
           <Route path="work-instructions/:id" element={g('workInstructions', <WorkInstructionDocPage />)} />
+          <Route path="settings" element={g('settings', <SystemSettingsPage />)} />
           <Route path="*" element={<EmptyState title="Page not found" description="The page you requested does not exist." />} />
         </Route>
       </Routes>

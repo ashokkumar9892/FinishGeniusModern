@@ -21,6 +21,8 @@ public static class Access
     public const string MaterialCategories = $"{GA},{SA}";
     public const string SubSteps = SA;
     public const string Import = $"{GA},{SA}";
+    /// <summary>System Settings (file storage folders).</summary>
+    public const string Settings = SA;
     /// <summary>Reading setup data (e.g. categories/sub steps) needed by the process builders.</summary>
     public const string ProcessRead = $"{P},{PP},{GA},{SA}";
 }

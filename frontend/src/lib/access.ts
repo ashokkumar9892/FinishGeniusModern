@@ -31,6 +31,7 @@ export const moduleRoles = {
   subSteps: [SystemAdmin],
   import: [GroupAdmin, SystemAdmin],
   messages: [FGPro, FGProPlus, GroupAdmin, SupportAgent, SystemAdmin],
+  settings: [SystemAdmin],
 } as const
 
 export type ModuleKey = keyof typeof moduleRoles
