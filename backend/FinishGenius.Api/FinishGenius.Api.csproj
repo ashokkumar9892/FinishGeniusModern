@@ -17,4 +17,11 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Data and settings the app saves at runtime (uploads, storage folders, page access) belong to each machine:
+         never copy a developer's App_Data into a build or deployment package. -->
+    <Content Remove="App_Data\**" />
+    <None Remove="App_Data\**" />
+  </ItemGroup>
+
 </Project>

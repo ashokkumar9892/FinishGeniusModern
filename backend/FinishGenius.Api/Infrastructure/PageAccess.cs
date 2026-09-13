@@ -186,10 +186,19 @@ public class PageAccessService
         }
         lock (_writeLock)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            var temp = _path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
-            File.Move(temp, _path, overwrite: true);
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+                var temp = _path + ".tmp";
+                File.WriteAllText(temp, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+                File.Move(temp, _path, overwrite: true);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                _log.LogError(e, "Page access could not be saved to {Path}", _path);
+                throw ApiException.Bad($"Page access could not be saved to {_path}: {e.Message} " +
+                                       "Give the IIS application pool identity Modify permission on the site's App_Data folder.");
+            }
             _settings = settings;
         }
         _log.LogWarning("Page access changed by {User}: {Pages} pages and {Tabs} tabs restricted", user, settings.Pages.Count, settings.Tabs.Count);
