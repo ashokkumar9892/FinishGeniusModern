@@ -54,7 +54,9 @@ powershell -ExecutionPolicy Bypass -File .\Install-IIS.ps1 -SiteName FinishGeniu
 
 The script:
 - enables IIS features and checks for the Hosting Bundle
-- copies the files to `C:\inetpub\FinishGenius` (keeps the existing `App_Data`, `logs` and `appsettings.Local.json`)
+- copies the files to `C:\inetpub\FinishGenius` (keeps the existing `App_Data`, `logs` and `appsettings.Local.json`;
+  sections that are new in the package's `appsettings.Local.json`, e.g. `Owner`, are added to the server's file,
+  existing values are never changed, and a `.bak-` copy is kept)
 - creates the app pool **FinishGenius** (No Managed Code, AlwaysRunning) and the website
 - grants the app pool **Modify** rights on `App_Data` and `logs`
 - opens the Windows Firewall port and calls `/api/health`

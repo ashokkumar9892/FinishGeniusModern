@@ -59,6 +59,23 @@ Get-ChildItem $PackagePath -Force | Where-Object { $_.Name -notin @('Install-IIS
   Copy-Item $_.FullName $target -Recurse -Force
 }
 New-Item -ItemType Directory -Force (Join-Path $SitePath 'App_Data\uploads'), (Join-Path $SitePath 'logs') | Out-Null
+
+# The existing appsettings.Local.json is kept, but sections added in a newer package (e.g. "Owner") are copied into it.
+# Settings already on the server are never changed; a backup is written first.
+$packageLocal = Join-Path $PackagePath 'appsettings.Local.json'
+$siteLocal = Join-Path $SitePath 'appsettings.Local.json'
+if ((Test-Path $packageLocal) -and (Test-Path $siteLocal)) {
+  $fromPackage = Get-Content $packageLocal -Raw | ConvertFrom-Json
+  $onServer = Get-Content $siteLocal -Raw | ConvertFrom-Json
+  $missing = @($fromPackage.PSObject.Properties | Where-Object { -not $onServer.PSObject.Properties[$_.Name] })
+  if ($missing.Count -gt 0) {
+    Copy-Item $siteLocal "$siteLocal.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')" -Force
+    foreach ($section in $missing) { $onServer | Add-Member -NotePropertyName $section.Name -NotePropertyValue $section.Value }
+    $onServer | ConvertTo-Json -Depth 20 | Set-Content $siteLocal -Encoding UTF8
+    Write-Host "  added to appsettings.Local.json: $(($missing | ForEach-Object Name) -join ', ') (backup kept next to it)"
+  }
+}
+
 if (-not (Test-Path (Join-Path $SitePath 'appsettings.Local.json'))) {
   Write-Warning "appsettings.Local.json not found in $SitePath. Copy appsettings.Local.example.json to appsettings.Local.json and set the connection string + JWT key before browsing the site."
 }
