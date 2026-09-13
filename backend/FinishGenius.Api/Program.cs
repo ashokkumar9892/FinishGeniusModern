@@ -6,6 +6,13 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
+// dotnet FinishGenius.Api.dll hash-password "<password>"   prints a bcrypt hash for Owner:PasswordHash
+if (args is [var command, var password] && command.Equals("hash-password", StringComparison.OrdinalIgnoreCase))
+{
+    Console.WriteLine(BCrypt.Net.BCrypt.HashPassword(password, BCrypt.Net.BCrypt.GenerateSalt(12)));
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Secrets (connection strings, JWT key) live in appsettings.Local.json, which is not committed to git.
@@ -66,6 +73,8 @@ builder.Services.AddScoped<CurrentUser>();
 builder.Services.AddScoped<AuditService>();
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddSingleton<FileStorage>();
+builder.Services.AddSingleton<PageAccessService>();
+builder.Services.AddSingleton<OwnerAccount>();
 builder.Services.AddScoped<FinishGenius.Api.Services.ScheduleCalculator>();
 builder.Services.AddScoped<FinishGenius.Api.Services.GroupCopyService>();
 builder.Services.AddScoped<FinishGenius.Api.Services.DeviceCommandService>();
@@ -137,6 +146,7 @@ foreach (var target in databases.All.Where(d => d.AutoMigrate))
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseAuthentication();
+app.UseMiddleware<PageAccessMiddleware>(); // pages the owner turned off; the owner account itself does not write data
 app.UseAuthorization();
 app.MapControllers();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok", time = DateTime.UtcNow }));

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Search } from 'lucide-react'
 import { api, errorMessage } from '@/lib/api'
+import { useVisibleTab } from '@/lib/access'
 import { useGroup } from '@/lib/auth'
 import { ErrorBanner, PageHeader, SearchInput, Tabs } from '@/components/ui'
 import { useHashTab } from '@/pages/mywork/shared'
@@ -15,7 +16,8 @@ type TabKey = (typeof TABS)[number]
 
 export default function DashboardPage() {
   const { groupId } = useGroup()
-  const [tab, setTab] = useHashTab<TabKey>(TABS, 'processList')
+  const [requestedTab, setTab] = useHashTab<TabKey>(TABS, 'processList')
+  const { allowed, tab } = useVisibleTab('dashboard', TABS, requestedTab)
   const [draft, setDraft] = useState('')
   const [search, setSearch] = useState('')
 
@@ -64,16 +66,18 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <Tabs<TabKey>
-        className="mb-4"
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { key: 'processList', label: 'My Work Processes' },
-          { key: 'deviceList', label: 'Devices' },
-          { key: 'departmentManagement', label: 'Department Management' },
-        ]}
-      />
+      {tab && (
+        <Tabs<TabKey>
+          className="mb-4"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { key: 'processList', label: 'My Work Processes', hidden: !allowed('processList') },
+            { key: 'deviceList', label: 'Devices', hidden: !allowed('deviceList') },
+            { key: 'departmentManagement', label: 'Department Management', hidden: !allowed('departmentManagement') },
+          ]}
+        />
+      )}
       {tab === 'processList' && <ProcessesTab search={search} />}
       {tab === 'deviceList' && <DevicesTab />}
       {tab === 'departmentManagement' && <DepartmentsTab search={search} />}

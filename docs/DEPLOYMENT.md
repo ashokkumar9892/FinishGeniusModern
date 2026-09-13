@@ -137,6 +137,20 @@ Production is the old site's database used as-is (`"Legacy": true`, mapping in `
   open them.
 - Old data contains a few corrupt quantities (up to 10^28 gallons); values that do not fit are shown as 0.
 
+### Owner account and Page Access
+
+- The owner account is configured on the server, not in any database: `Owner:Username` and `Owner:PasswordHash`
+  (bcrypt) in `appsettings.Local.json`. Make the hash with `dotnet FinishGenius.Api.dll hash-password "<password>"`
+  and recycle the app pool. Leave `Owner` out to have no owner account.
+- It signs in on the normal sign-in page (any database), sees every page, and is the only account that sees
+  **Administration → Page Access**. There it turns pages and tabs off per role, one role or all roles at once. A role
+  never gets more than its built-in access. The switches are saved in `App_Data\page-access.json` (kept by
+  `Install-IIS.ps1`) and apply to every database; users see changes within two minutes.
+- Hidden pages disappear from the menu and their routes, and their own APIs refuse calls (403). APIs shared by several
+  pages (materials, categories, documents, groups, files) stay open. Hidden tabs are hidden in the page.
+- The owner has no user record, so it does not change business data: write calls other than sign-in, Page Access and
+  System Settings are refused. Use a regular account for day-to-day work.
+
 ### Pointing at a different database / importing legacy data
 
 - To use another database, change `ConnectionStrings:Default` in `appsettings.Local.json` and recycle the app pool —

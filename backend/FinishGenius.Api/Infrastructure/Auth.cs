@@ -43,6 +43,24 @@ public class TokenService(Microsoft.Extensions.Options.IOptions<JwtOptions> opti
             signingCredentials: new SigningCredentials(_o.SigningKey(), SecurityAlgorithms.HmacSha256));
         return (new JwtSecurityTokenHandler().WriteToken(token), expires);
     }
+
+    /// <summary>Session of the owner account (no user record: id 0, every role, all groups).</summary>
+    public (string token, DateTime expires) CreateOwner(string username, bool rememberMe, string database)
+    {
+        var expires = rememberMe ? DateTime.UtcNow.AddDays(_o.RememberMeDays) : DateTime.UtcNow.AddHours(_o.ExpiryHours);
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, "0"),
+            new(ClaimTypes.Name, username),
+            new("groupId", "0"),
+            new(DatabaseCatalog.Claim, database),
+            new(OwnerAccount.Claim, "1"),
+        };
+        claims.AddRange(Roles.All.Select(r => new Claim(ClaimTypes.Role, r)));
+        var token = new JwtSecurityToken(_o.Issuer, _o.Audience, claims, expires: expires,
+            signingCredentials: new SigningCredentials(_o.SigningKey(), SecurityAlgorithms.HmacSha256));
+        return (new JwtSecurityTokenHandler().WriteToken(token), expires);
+    }
 }
 
 public static class Passwords

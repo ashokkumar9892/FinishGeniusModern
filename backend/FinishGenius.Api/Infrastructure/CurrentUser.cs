@@ -17,6 +17,8 @@ public class CurrentUser(IHttpContextAccessor http, AppDbContext db)
     public int GroupId => int.TryParse(Principal.FindFirstValue("groupId"), out var g) ? g : 0;
     public bool IsInRole(string role) => Principal.IsInRole(role);
     public bool IsSystemAdmin => IsInRole(Roles.SystemAdmin);
+    /// <summary>The configured owner account (no user record; see <see cref="OwnerAccount"/>).</summary>
+    public bool IsOwner => Principal.HasClaim(OwnerAccount.Claim, "1");
     public bool IsGroupAdmin => IsInRole(Roles.GroupAdmin);
     /// <summary>System admins and support agents work across all groups.</summary>
     public bool SeesAllGroups => IsSystemAdmin || IsInRole(Roles.SupportAgent);

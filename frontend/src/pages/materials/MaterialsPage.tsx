@@ -5,7 +5,7 @@ import { AlertTriangle, Boxes, Copy, DollarSign, FileText, FolderOpen, History, 
 import clsx from 'clsx'
 import { api, errorMessage } from '@/lib/api'
 import { useGroup, useMe } from '@/lib/auth'
-import { isAdmin } from '@/lib/access'
+import { isAdmin, useVisibleTab } from '@/lib/access'
 import { money, num } from '@/lib/format'
 import { MaterialType } from '@/lib/types'
 import { DataTable, type Column } from '@/components/DataTable'
@@ -59,7 +59,9 @@ export default function MaterialsPage() {
   const navigate = useNavigate()
 
   const hash = location.hash.replace(/^#/, '') as TabKey
-  const tab: TabKey = tabLabels.some(([k]) => k === hash) ? hash : 'base'
+  const requestedTab: TabKey = tabLabels.some(([k]) => k === hash) ? hash : 'base'
+  const { allowed: tabAllowed, tab: visibleTab } = useVisibleTab('materials', tabLabels.map(([k]) => k), requestedTab)
+  const tab: TabKey = visibleTab ?? requestedTab
   const setTab = (k: TabKey) => navigate({ search: location.search, hash: k }, { replace: true })
   const mt = materialTabs[tab]
 
@@ -294,7 +296,7 @@ export default function MaterialsPage() {
         className="mb-4"
         value={tab}
         onChange={setTab}
-        tabs={tabLabels.map(([key, label]) => ({ key, label, count: counts[key] }))}
+        tabs={tabLabels.map(([key, label]) => ({ key, label, count: counts[key], hidden: !tabAllowed(key) }))}
       />
 
       {materials.isError && <ErrorBanner message={errorMessage(materials.error)} />}

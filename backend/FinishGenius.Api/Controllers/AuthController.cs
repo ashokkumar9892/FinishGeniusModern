@@ -9,7 +9,8 @@ namespace FinishGenius.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me, DatabaseCatalog databases, DatabaseSelector database) : ControllerBase
+public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me, DatabaseCatalog databases, DatabaseSelector database,
+    OwnerAccount owner, PageAccessService access) : ControllerBase
 {
     public record LoginRequest(string Username, string Password, bool RememberMe);
     public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
@@ -28,6 +29,13 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
     public async Task<IActionResult> Login(LoginRequest req)
     {
         var name = (req.Username ?? "").Trim();
+        // The owner account lives in the server configuration, not in any database.
+        if (owner.Matches(name, req.Password))
+        {
+            var (ownerToken, ownerExpires) = tokens.CreateOwner(owner.Username!, req.RememberMe, database.Current.Key);
+            return Ok(new { token = ownerToken, expires = ownerExpires });
+        }
+
         // Imported legacy data can contain the same username/email on an enabled and a disabled account.
         var candidates = await db.Users.Include(u => u.Roles)
             .Where(u => !u.IsDeleted && (u.Username == name || u.Email == name))
@@ -54,28 +62,54 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
     [Authorize]
     public async Task<IActionResult> Me()
     {
-        var user =await db.Users.AsNoTracking().Include(u => u.Roles).FirstOrDefaultAsync(u => u.Id == me.Id && !u.IsDeleted);
+        if (me.IsOwner) return Ok(await OwnerMeAsync());
+        var user = await db.Users.AsNoTracking().Include(u => u.Roles).FirstOrDefaultAsync(u => u.Id == me.Id && !u.IsDeleted);
         if (user == null || user.Disabled) return Unauthorized(new { message = "Session expired." });
         var groupIds = await me.GroupIdsAsync();
         var groups = await db.Groups.AsNoTracking().Where(g => groupIds.Contains(g.Id))
             .OrderBy(g => g.Name).Select(g => new { g.Id, g.Name, g.LogoFile }).ToListAsync();
         var unread = await db.MessageRecipients.CountAsync(r => r.UserId == me.Id && !r.Viewed);
         var defaultGroup = user.DefaultGroupId is int d && groupIds.Contains(d) ? d : user.GroupId;
+        var roles = user.Roles.Select(r => r.Role).ToList();
+        var (hiddenPages, hiddenTabs) = access.HiddenFor(roles);
         return Ok(new
         {
             user.Id, user.Username, user.Email, user.FirstName, user.LastName, user.PhoneNumber, user.GroupId,
             DefaultGroupId = defaultGroup, user.AgreementAccepted,
-            Roles = user.Roles.Select(r => r.Role).ToList(),
+            Roles = roles,
             Groups = groups,
             UnreadMessages = unread,
             Database = new { database.Current.Key, database.Current.Label, database.Current.Production },
+            IsOwner = false,
+            HiddenPages = hiddenPages,
+            HiddenTabs = hiddenTabs,
         });
+    }
+
+    private async Task<object> OwnerMeAsync()
+    {
+        var groupIds = await me.GroupIdsAsync();
+        var groups = await db.Groups.AsNoTracking().Where(g => groupIds.Contains(g.Id))
+            .OrderBy(g => g.Name).Select(g => new { g.Id, g.Name, g.LogoFile }).ToListAsync();
+        return new
+        {
+            Id = 0, Username = me.UserName, Email = "", FirstName = "Owner", LastName = (string?)null, PhoneNumber = (string?)null,
+            GroupId = 0, DefaultGroupId = groups.Count > 0 ? groups[0].Id : 0, AgreementAccepted = true,
+            Roles = Roles.All,
+            Groups = groups,
+            UnreadMessages = 0,
+            Database = new { database.Current.Key, database.Current.Label, database.Current.Production },
+            IsOwner = true,
+            HiddenPages = Array.Empty<string>(),
+            HiddenTabs = Array.Empty<string>(),
+        };
     }
 
     [HttpPost("accept-agreement")]
     [Authorize]
     public async Task<IActionResult> AcceptAgreement()
     {
+        if (me.IsOwner) return Ok(new { message = "Agreement accepted." });
         var user = await db.Users.FirstAsync(u => u.Id == me.Id);
         user.AgreementAccepted = true;
         user.AgreementAcceptedAt = DateTime.UtcNow;
@@ -87,6 +121,7 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
     [Authorize]
     public async Task<IActionResult> ChangePassword(ChangePasswordRequest req)
     {
+        if (me.IsOwner) throw ApiException.Bad("The owner password is set on the server (Owner:PasswordHash in appsettings.Local.json).");
         var user = await db.Users.FirstAsync(u => u.Id == me.Id);
         if (!Passwords.Verify(user.PasswordHash, req.CurrentPassword ?? ""))
             throw ApiException.Bad("Current password is incorrect.");
@@ -101,6 +136,7 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
     [Authorize]
     public async Task<IActionResult> SetDefaultGroup(int groupId)
     {
+        if (me.IsOwner) throw ApiException.Bad("The owner account has no saved default group; pick the group in the header.");
         await me.EnsureGroupAsync(groupId);
         var user = await db.Users.FirstAsync(u => u.Id == me.Id);
         user.DefaultGroupId = groupId;
@@ -113,6 +149,7 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
     [Authorize]
     public async Task<IActionResult> ClearDefaultGroup()
     {
+        if (me.IsOwner) throw ApiException.Bad("The owner account has no saved default group.");
         var user = await db.Users.FirstAsync(u => u.Id == me.Id);
         user.DefaultGroupId = null;
         await db.SaveChangesAsync();

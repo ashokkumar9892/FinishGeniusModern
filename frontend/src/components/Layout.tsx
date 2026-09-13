@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   BookOpen, Building2, Calculator, CalendarRange, ChevronsLeft, ChevronsRight, ClipboardCheck, Database, DollarSign, FlaskConical,
-  HardDrive, HelpCircle, Images, KeyRound, Layers, LayoutDashboard, ListOrdered, LogOut, Mail, Menu, Moon, Package, Sun, Tags, Upload, UserCog, Users,
+  HardDrive, HelpCircle, Images, KeyRound, Layers, LayoutDashboard, ListOrdered, LogOut, Mail, Menu, Moon, Package, ShieldCheck, Sun, Tags, Upload, UserCog, Users,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth, useGroup } from '@/lib/auth'
@@ -52,6 +52,7 @@ export const navSections: { title: string; items: NavItem[] }[] = [
       { to: '/sub-steps', label: 'Sub Step Setup', icon: <Layers />, module: 'subSteps' },
       { to: '/import', label: 'Import', icon: <Upload />, module: 'import' },
       { to: '/settings', label: 'System Settings', icon: <HardDrive />, module: 'settings' },
+      { to: '/access', label: 'Page Access', icon: <ShieldCheck />, module: 'access' },
     ],
   },
 ]
@@ -199,42 +200,51 @@ export function Layout() {
               <Database className="h-3 w-3" /> {me.database.label}
             </span>
           )}
+          {me.isOwner && (
+            <span className="badge hidden sm:inline-flex gap-1 ring-1 bg-primary/10 text-primary ring-primary/30" title="Owner account: sees every page and manages Page Access">
+              <ShieldCheck className="h-3 w-3" /> Owner
+            </span>
+          )}
           <div className="flex-1" />
 
-          <Dropdown
-            trigger={
-              <button className="btn-ghost h-9 px-2.5" title="Help & support">
-                <HelpCircle className="h-5 w-5" />
-                <span className="hidden xl:inline">Help & support</span>
-              </button>
-            }
-          >
-            {(close) => (
-              <>
-                <button className={menuItem} onClick={() => { close(); navigate('/messages?compose=Support') }}>
-                  <HelpCircle className="h-4 w-4" /> FG APP Support
-                </button>
-                <button className={menuItem} onClick={() => { close(); navigate('/messages?compose=Question') }}>
-                  <FlaskConical className="h-4 w-4" /> Finishing Questions
-                </button>
-                {isSystemAdmin(me) && (
-                  <button className={menuItem} onClick={() => { close(); navigate('/messages?compose=Internal') }}>
-                    <UserCog className="h-4 w-4" /> Internal DPM
+          {canAccess(me, 'messages') && (
+            <>
+              <Dropdown
+                trigger={
+                  <button className="btn-ghost h-9 px-2.5" title="Help & support">
+                    <HelpCircle className="h-5 w-5" />
+                    <span className="hidden xl:inline">Help & support</span>
                   </button>
+                }
+              >
+                {(close) => (
+                  <>
+                    <button className={menuItem} onClick={() => { close(); navigate('/messages?compose=Support') }}>
+                      <HelpCircle className="h-4 w-4" /> FG APP Support
+                    </button>
+                    <button className={menuItem} onClick={() => { close(); navigate('/messages?compose=Question') }}>
+                      <FlaskConical className="h-4 w-4" /> Finishing Questions
+                    </button>
+                    {isSystemAdmin(me) && (
+                      <button className={menuItem} onClick={() => { close(); navigate('/messages?compose=Internal') }}>
+                        <UserCog className="h-4 w-4" /> Internal DPM
+                      </button>
+                    )}
+                  </>
                 )}
-              </>
-            )}
-          </Dropdown>
+              </Dropdown>
 
-          <Link to="/messages" className="btn-ghost h-9 px-2.5 relative" title="DPM Center (messages)">
-            <Mail className="h-5 w-5" />
-            <span className="hidden xl:inline">DPM Center</span>
-            {me.unreadMessages > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full bg-primary text-[10px] font-bold text-white grid place-items-center px-1">
-                {me.unreadMessages > 99 ? '99+' : me.unreadMessages}
-              </span>
-            )}
-          </Link>
+              <Link to="/messages" className="btn-ghost h-9 px-2.5 relative" title="DPM Center (messages)">
+                <Mail className="h-5 w-5" />
+                <span className="hidden xl:inline">DPM Center</span>
+                {me.unreadMessages > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full bg-primary text-[10px] font-bold text-white grid place-items-center px-1">
+                    {me.unreadMessages > 99 ? '99+' : me.unreadMessages}
+                  </span>
+                )}
+              </Link>
+            </>
+          )}
 
           <button className="btn-icon" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} title="Toggle theme">
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -257,9 +267,11 @@ export function Layout() {
                   <div className="text-sm font-medium truncate">{me.username}</div>
                   <div className="text-xs text-muted-foreground truncate">{me.email}</div>
                 </div>
-                <button className={menuItem} onClick={() => { close(); navigate('/profile') }}>
-                  <KeyRound className="h-4 w-4" /> Profile & password
-                </button>
+                {!me.isOwner && (
+                  <button className={menuItem} onClick={() => { close(); navigate('/profile') }}>
+                    <KeyRound className="h-4 w-4" /> Profile & password
+                  </button>
+                )}
                 <button className={menuItem} onClick={() => { close(); logout(); navigate('/login') }}>
                   <LogOut className="h-4 w-4" /> Sign out
                 </button>

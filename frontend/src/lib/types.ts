@@ -18,6 +18,12 @@ export interface Me {
   groups: GroupRef[]
   unreadMessages: number
   database: DatabaseRef
+  /** The configured owner account (sees everything, manages Page Access). */
+  isOwner?: boolean
+  /** Pages the owner turned off for this user's roles (module keys). */
+  hiddenPages?: string[]
+  /** Tabs the owner turned off ("page.tab"). */
+  hiddenTabs?: string[]
 }
 
 /** A database the user can sign in to (GET /auth/databases). */

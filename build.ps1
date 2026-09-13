@@ -37,9 +37,21 @@ foreach ($tool in 'node', 'npm', 'dotnet') {
 Write-Host "node $(node -v) | dotnet $(dotnet --version)"
 
 Step 'Building frontend (React + Vite)'
-Push-Location (Join-Path $root 'frontend')
+$web = Join-Path $root 'frontend'
+Push-Location $web
 try {
-  if (-not $SkipNpmInstall) { npm ci --no-audit --no-fund; if ($LASTEXITCODE) { throw 'npm ci failed' } }
+  # npm ci deletes node_modules first: skip it when the installed packages already match package-lock.json.
+  $installed = Join-Path $web 'node_modules\.package-lock.json'
+  $upToDate = (Test-Path $installed) -and ((Get-Item $installed).LastWriteTime -ge (Get-Item (Join-Path $web 'package-lock.json')).LastWriteTime)
+  if ($SkipNpmInstall -or $upToDate) {
+    Write-Host 'Frontend packages are up to date (npm ci skipped).'
+  } else {
+    # A running local UI (restart-local.bat's "FG UI" window) keeps native files in node_modules open; npm ci would
+    # fail halfway through deleting the folder.
+    $devServer = Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like "*$web*" }
+    if ($devServer) { throw 'The local UI ("FG UI" window, Vite dev server) is running and locks frontend packages. Close that window and run build.ps1 again.' }
+    npm ci --no-audit --no-fund; if ($LASTEXITCODE) { throw 'npm ci failed' }
+  }
   npm run build; if ($LASTEXITCODE) { throw 'Frontend build failed' }
 } finally { Pop-Location }
 

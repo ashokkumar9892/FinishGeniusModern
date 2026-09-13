@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, ListTree, Pencil, Plus, Save, SlidersHorizontal, Tags, Trash2, Undo2 } from 'lucide-react'
 import clsx from 'clsx'
 import { api, errorMessage } from '@/lib/api'
+import { useVisibleTab } from '@/lib/access'
 import { useGroup, useLookups } from '@/lib/auth'
 import { MaterialType, materialTypeLabel } from '@/lib/types'
 import { DataTable, type Column } from '@/components/DataTable'
@@ -38,7 +39,8 @@ export default function MaterialCategoriesPage() {
     const h = location.hash.replace('#', '')
     return typeTabs.some((t) => t.key === h) ? h : String(MaterialType.Base)
   })
-  const type = Number(tab)
+  const { allowed: tabAllowed, tab: visibleTab } = useVisibleTab('materialCategories', typeTabs.map((t) => t.key), tab)
+  const type = Number(visibleTab ?? tab)
   const categories = useCategories(groupId, type)
   const all = useCategories(groupId)
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -119,7 +121,12 @@ export default function MaterialCategoriesPage() {
           </button>
         }
       />
-      <Tabs className="mb-4" value={tab} onChange={setTab} tabs={typeTabs.map((t) => ({ key: t.key, label: t.label, count: counts[t.type] ?? 0 }))} />
+      <Tabs
+        className="mb-4"
+        value={visibleTab ?? tab}
+        onChange={setTab}
+        tabs={typeTabs.map((t) => ({ key: t.key, label: t.label, count: counts[t.type] ?? 0, hidden: !tabAllowed(t.key) }))}
+      />
       {categories.isError && <ErrorBanner message={errorMessage(categories.error)} />}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
