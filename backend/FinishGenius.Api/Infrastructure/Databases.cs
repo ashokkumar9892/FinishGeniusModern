@@ -61,8 +61,9 @@ public class DatabaseCatalog
 
     /// <summary>
     /// The database a sign-in opens, decided by the address the browser used: a <c>Database:ProductionHosts</c> entry
-    /// opens the Production database, anything else the development one. An entry without a port ("app.finishgenius.net")
-    /// matches only the default ports 80/443, so "35.196.141.157" is Production while "35.196.141.157:9001" is not.
+    /// opens the Production database, anything else the development one. An entry without a port ("35.196.141.157",
+    /// "app.finishgenius.net") matches that address on every port (35.196.141.157:9001 is Production too); an entry with a
+    /// port ("host:9001") matches only that port.
     /// </summary>
     public DatabaseTarget ForHost(HostString host)
     {
@@ -75,7 +76,7 @@ public class DatabaseCatalog
         {
             var e = HostString.FromUriComponent(entry.Trim());
             if (!e.Host.Equals(host.Host, StringComparison.OrdinalIgnoreCase)) return false;
-            return e.Port.HasValue ? e.Port == port : port is 0 or 80 or 443;
+            return !e.Port.HasValue || e.Port == port;
         });
         return isProduction ? production : development;
     }
