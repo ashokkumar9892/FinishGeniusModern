@@ -1607,3 +1607,382 @@ END;
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    DROP INDEX [IX_InventoryTransactions_GroupId] ON [fg].[InventoryTransactions];
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    ALTER TABLE [fg].[Materials] ADD [ColorCode] nvarchar(400) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    ALTER TABLE [fg].[Formulas] ADD [BatchType] int NOT NULL DEFAULT 2;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    ALTER TABLE [fg].[Formulas] ADD [BatchValue] decimal(18,4) NOT NULL DEFAULT 0.0;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    ALTER TABLE [fg].[Formulas] ADD [DispenserId] int NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    ALTER TABLE [fg].[Formulas] ADD [EmployeeName] nvarchar(400) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    ALTER TABLE [fg].[Formulas] ADD [MixedOn] datetime2 NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    ALTER TABLE [fg].[Formulas] ADD [PurchaseOrderNumber] nvarchar(400) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    ALTER TABLE [fg].[FormulaIngredients] ADD [BatchNumber] nvarchar(400) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    ALTER TABLE [fg].[FormulaIngredients] ADD [DispenseAmount] decimal(18,4) NOT NULL DEFAULT 0.0;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    ALTER TABLE [fg].[AuditLogs] ADD [NewValue] nvarchar(400) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    ALTER TABLE [fg].[AuditLogs] ADD [OldValue] nvarchar(400) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE TABLE [fg].[DeviceCommands] (
+        [Id] int NOT NULL IDENTITY,
+        [DeviceId] int NOT NULL,
+        [BridgeDeviceId] int NOT NULL,
+        [CommandType] nvarchar(400) NOT NULL,
+        [Payload] nvarchar(max) NULL,
+        [Status] nvarchar(400) NOT NULL,
+        [ResultMessage] nvarchar(4000) NULL,
+        [ResultData] nvarchar(4000) NULL,
+        [FormulaId] int NULL,
+        [CreatedBy] int NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        [SentAt] datetime2 NULL,
+        [CompletedAt] datetime2 NULL,
+        [ExpiresAt] datetime2 NOT NULL,
+        [GroupId] int NOT NULL,
+        CONSTRAINT [PK_DeviceCommands] PRIMARY KEY ([Id]),
+        CONSTRAINT [FK_DeviceCommands_Groups_GroupId] FOREIGN KEY ([GroupId]) REFERENCES [fg].[Groups] ([Id]) ON DELETE NO ACTION
+    );
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE TABLE [fg].[DispenseSettings] (
+        [Id] int NOT NULL IDENTITY,
+        [GroupId] int NOT NULL,
+        [CleanNozzleHours] int NULL,
+        [IsNozzleCleaned] bit NOT NULL,
+        [LastDispensedAt] datetime2 NULL,
+        CONSTRAINT [PK_DispenseSettings] PRIMARY KEY ([Id])
+    );
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE TABLE [fg].[FormulaDevicePreferences] (
+        [Id] int NOT NULL IDENTITY,
+        [UserId] int NOT NULL,
+        [FormulaId] int NOT NULL,
+        [ScaleDeviceId] int NULL,
+        [PrinterDeviceId] int NULL,
+        [UpdatedAt] datetime2 NOT NULL,
+        CONSTRAINT [PK_FormulaDevicePreferences] PRIMARY KEY ([Id])
+    );
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE TABLE [fg].[FormulaDispenseSnapshots] (
+        [Id] int NOT NULL IDENTITY,
+        [FormulaId] int NOT NULL,
+        [IngredientId] int NOT NULL,
+        [Grams] decimal(18,4) NOT NULL,
+        [DispenseAmount] decimal(18,4) NOT NULL,
+        [DispensedGrams] decimal(18,4) NOT NULL,
+        [IsDispensed] bit NOT NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        CONSTRAINT [PK_FormulaDispenseSnapshots] PRIMARY KEY ([Id])
+    );
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE TABLE [fg].[PurgeFailures] (
+        [Id] int NOT NULL IDENTITY,
+        [BridgeDeviceId] int NOT NULL,
+        [CanisterNumber] int NOT NULL,
+        [Message] nvarchar(400) NULL,
+        [IsActive] bit NOT NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        CONSTRAINT [PK_PurgeFailures] PRIMARY KEY ([Id])
+    );
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE TABLE [fg].[PurgeSettings] (
+        [Id] int NOT NULL IDENTITY,
+        [BridgeDeviceId] int NOT NULL,
+        [FromDate] date NOT NULL,
+        [ToDate] date NOT NULL,
+        [Time] time NOT NULL,
+        [CreatedBy] int NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        [UpdatedBy] int NULL,
+        [UpdatedAt] datetime2 NULL,
+        CONSTRAINT [PK_PurgeSettings] PRIMARY KEY ([Id])
+    );
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE TABLE [fg].[PurgeSuccesses] (
+        [Id] int NOT NULL IDENTITY,
+        [BridgeDeviceId] int NOT NULL,
+        [CanisterNumber] int NOT NULL,
+        [Message] nvarchar(400) NULL,
+        [PurgeType] nvarchar(400) NULL,
+        [ExecutedAt] datetime2 NOT NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        CONSTRAINT [PK_PurgeSuccesses] PRIMARY KEY ([Id])
+    );
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE INDEX [IX_InventoryTransactions_GroupId_BatchNumber] ON [fg].[InventoryTransactions] ([GroupId], [BatchNumber]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE INDEX [IX_DeviceCommands_BridgeDeviceId_Status] ON [fg].[DeviceCommands] ([BridgeDeviceId], [Status]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE INDEX [IX_DeviceCommands_FormulaId_CommandType] ON [fg].[DeviceCommands] ([FormulaId], [CommandType]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE INDEX [IX_DeviceCommands_GroupId] ON [fg].[DeviceCommands] ([GroupId]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE UNIQUE INDEX [IX_DispenseSettings_GroupId] ON [fg].[DispenseSettings] ([GroupId]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE UNIQUE INDEX [IX_FormulaDevicePreferences_UserId_FormulaId] ON [fg].[FormulaDevicePreferences] ([UserId], [FormulaId]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE INDEX [IX_FormulaDispenseSnapshots_FormulaId] ON [fg].[FormulaDispenseSnapshots] ([FormulaId]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE INDEX [IX_PurgeFailures_BridgeDeviceId_IsActive] ON [fg].[PurgeFailures] ([BridgeDeviceId], [IsActive]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE UNIQUE INDEX [IX_PurgeSettings_BridgeDeviceId] ON [fg].[PurgeSettings] ([BridgeDeviceId]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    CREATE INDEX [IX_PurgeSuccesses_BridgeDeviceId_ExecutedAt] ON [fg].[PurgeSuccesses] ([BridgeDeviceId], [ExecutedAt]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260910235834_FormulaWorkspace'
+)
+BEGIN
+    INSERT INTO [fg].[__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20260910235834_FormulaWorkspace', N'10.0.12');
+END;
+
+COMMIT;
+GO
+
+BEGIN TRANSACTION;
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260911012305_FormulaMaterialLink'
+)
+BEGIN
+    ALTER TABLE [fg].[Formulas] ADD [MaterialId] int NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260911012305_FormulaMaterialLink'
+)
+BEGIN
+    CREATE INDEX [IX_Formulas_MaterialId] ON [fg].[Formulas] ([MaterialId]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260911012305_FormulaMaterialLink'
+)
+BEGIN
+    ALTER TABLE [fg].[Formulas] ADD CONSTRAINT [FK_Formulas_Materials_MaterialId] FOREIGN KEY ([MaterialId]) REFERENCES [fg].[Materials] ([Id]) ON DELETE NO ACTION;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260911012305_FormulaMaterialLink'
+)
+BEGIN
+    UPDATE f SET f.MaterialId = m.Id
+    FROM fg.Formulas f JOIN fg.Materials m ON m.Id = f.Id AND m.MaterialType = 6
+    WHERE f.MaterialId IS NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260911012305_FormulaMaterialLink'
+)
+BEGIN
+    DECLARE @map TABLE (FormulaId int NOT NULL, MaterialId int NOT NULL);
+    MERGE fg.Materials AS t
+    USING (SELECT Id, GroupId, CategoryId, Name, Number FROM fg.Formulas WHERE MaterialId IS NULL AND IsDeleted = 0) AS s
+    ON 1 = 0
+    WHEN NOT MATCHED THEN
+        INSERT (GroupId, MaterialType, CategoryId, ProductCode, ProductName, Density, Price, Voc, Hap, Tap, MinQuantity, IsDeleted, CreatedAt)
+        VALUES (s.GroupId, 6, s.CategoryId, s.Number, s.Name, 0, 0, 0, 0, 0, 0, 0, SYSUTCDATETIME())
+    OUTPUT s.Id, inserted.Id INTO @map (FormulaId, MaterialId);
+    UPDATE f SET f.MaterialId = m.MaterialId FROM fg.Formulas f JOIN @map m ON m.FormulaId = f.Id;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260911012305_FormulaMaterialLink'
+)
+BEGIN
+    INSERT INTO [fg].[__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20260911012305_FormulaMaterialLink', N'10.0.12');
+END;
+
+COMMIT;
+GO
+
