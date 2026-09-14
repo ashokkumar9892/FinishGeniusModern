@@ -57,12 +57,18 @@ public static partial class LegacyModel
             SELECT g.ID, ISNULL(NULLIF(LTRIM(RTRIM(g.Name)), ''), CONCAT('Group ', g.ID)) AS Name,
                    g.Address1, g.Address2, g.City, g.State, g.Zip, g.Country,
                    ISNULL(NULLIF(g.TimeZone, ''), 'Eastern Standard Time') AS TimeZone, g.ApiKey,
-                   CAST(NULL AS nvarchar(400)) AS LogoFile, ISNULL(g.deletionEnabled, 0) AS deletionEnabled,
-                   ISNULL(g.IsDeleted, 0) AS IsDeleted, ISNULL(g.UpdatedDt, CAST('2000-01-01' AS datetime)) AS CreatedAt, g.UpdatedDt
+                   CAST(NULL AS nvarchar(400)) AS LogoFile, CAST(0 AS bit) AS ChecklistDeletionEnabled,
+                   CAST(CASE WHEN g.deletionEnabled = 1 OR g.IsDeleted = 1 THEN 1 ELSE 0 END AS bit) AS deletionEnabled,
+                   ISNULL(g.UpdatedDt, CAST('2000-01-01' AS datetime)) AS CreatedAt, g.UpdatedDt
             FROM dbo.Groups g
             """);
         e.Property(x => x.Id).HasColumnName("ID");
-        e.Property(x => x.ChecklistDeletionEnabled).HasColumnName("deletionEnabled");
+        // The old site's "delete group" sets deletionEnabled = 1 and every list hides those groups (spGetAllGroupByFilter):
+        // 379 of 475 Prod groups. So that column is the group's deleted flag here, not "checklist deletion on submit".
+        e.Property(x => x.IsDeleted).HasColumnName("deletionEnabled");
+        ReadOnly(e.Property(x => x.ChecklistDeletionEnabled));
+        e.Property(x => x.ChecklistDeletionEnabled).HasAnnotation(Unsupported,
+            "\"Enable Checklist Deletion on Submit\" (on this database it is the old site's deleted flag and would hide the group)");
         e.Property(x => x.UpdatedAt).HasColumnName("UpdatedDt");
         ReadOnly(e.Property(x => x.LogoFile));   // legacy logos are keyed files (LogoKey), not paths
         ReadOnly(e.Property(x => x.CreatedAt));  // no such column

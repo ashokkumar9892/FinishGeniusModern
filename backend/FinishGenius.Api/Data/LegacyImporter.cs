@@ -289,7 +289,9 @@ public class LegacyImporter(AppDbContext db, IConfiguration config, ILogger log)
         await Exec("Groups", Ident("Groups", $"""
             INSERT INTO fg.Groups (Id, Name, Address1, Address2, City, State, Zip, Country, TimeZone, ApiKey, LogoFile, ChecklistDeletionEnabled, IsDeleted, CreatedAt, UpdatedAt)
             SELECT g.ID, LEFT(ISNULL(NULLIF(LTRIM(RTRIM(g.Name)), ''), CONCAT('Group ', g.ID)), 400), g.Address1, g.Address2, g.City, g.State, g.Zip, g.Country,
-                   LEFT(ISNULL(NULLIF(g.TimeZone, ''), 'Eastern Standard Time'), 400), g.ApiKey, NULL, ISNULL(g.deletionEnabled, 0), ISNULL(g.IsDeleted, 0),
+                   -- the old site's "delete group" sets deletionEnabled = 1 and hides the group everywhere
+                   LEFT(ISNULL(NULLIF(g.TimeZone, ''), 'Eastern Standard Time'), 400), g.ApiKey, NULL, 0,
+                   CASE WHEN g.deletionEnabled = 1 OR g.IsDeleted = 1 THEN 1 ELSE 0 END,
                    ISNULL(g.UpdatedDt, SYSUTCDATETIME()), g.UpdatedDt
             FROM {s}Groups g;
             """));

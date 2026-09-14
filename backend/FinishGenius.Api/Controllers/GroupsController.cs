@@ -305,7 +305,8 @@ public class GroupsController(AppDbContext db, CurrentUser me, AuditService audi
     /// <summary>The group the user explicitly chose ("Choose"); null after "Unselect".</summary>
     private async Task<int?> DefaultGroupIdAsync(List<int> accessible)
     {
-        var d = await db.Users.AsNoTracking().Where(x => x.Id == me.Id).Select(x => x.DefaultGroupId).FirstAsync();
+        // FirstOrDefault: the owner account has no user record.
+        var d = await db.Users.AsNoTracking().Where(x => x.Id == me.Id).Select(x => x.DefaultGroupId).FirstOrDefaultAsync();
         return d is int id && accessible.Contains(id) ? id : null;
     }
 
