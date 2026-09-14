@@ -19,7 +19,7 @@ public class DatabaseTarget
 
 /// <summary>
 /// The configured databases. <c>appsettings.Local.json</c>:
-/// <code>"Databases": { "Dev": { "Label": "Development", "ConnectionString": "..." }, "Prod": { ... } }, "Database": { "Default": "Dev" }</code>
+/// <code>"Databases": { "Dev": { "Label": "Development", "ConnectionString": "..." }, "Prod": { ... } }, "Database": { "Default": "Dev", "Use": "Production" }</code>
 /// A plain <c>ConnectionStrings:Default</c> (older config) still works as a single "Dev" database.
 /// </summary>
 public class DatabaseCatalog
@@ -27,11 +27,15 @@ public class DatabaseCatalog
     /// <summary>JWT claim carrying the session's database key.</summary>
     public const string Claim = "db";
 
+    private readonly IConfiguration _config;
+    private readonly string[] _productionHosts;
+
     public IReadOnlyList<DatabaseTarget> All { get; }
     public DatabaseTarget Default { get; }
 
     public DatabaseCatalog(IConfiguration config)
     {
+        _config = config;
         var autoMigrate = config.GetValue("Database:AutoMigrate", true);
         var list = config.GetSection("Databases").GetChildren()
             .Where(s => IsSet(s["ConnectionString"]))
@@ -57,16 +61,32 @@ public class DatabaseCatalog
         _productionHosts = config.GetSection("Database:ProductionHosts").Get<string[]>() ?? [];
     }
 
-    private readonly string[] _productionHosts;
+    /// <summary>
+    /// <c>Database:Use</c> — the database this site signs in to, by key or label ("Prod", "Production", "Dev",
+    /// "Development"). Empty = decided by the site address (<see cref="ForHost"/>). Read on every request, so a change in
+    /// appsettings.Local.json applies without a restart.
+    /// </summary>
+    public DatabaseTarget? Forced
+    {
+        get
+        {
+            var use = _config["Database:Use"]?.Trim();
+            if (string.IsNullOrEmpty(use)) return null;
+            return Find(use) ?? All.FirstOrDefault(d => d.Label.Equals(use, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ApiException(StatusCodes.Status503ServiceUnavailable,
+                    $"Database:Use is \"{use}\", but no database has that name. Configured: {string.Join(", ", All.Select(d => $"{d.Key} ({d.Label})"))}.");
+        }
+    }
 
     /// <summary>
-    /// The database a sign-in opens, decided by the address the browser used: a <c>Database:ProductionHosts</c> entry
-    /// opens the Production database, anything else the development one. An entry without a port ("35.196.141.157",
-    /// "app.finishgenius.net") matches that address on every port (35.196.141.157:9001 is Production too); an entry with a
-    /// port ("host:9001") matches only that port.
+    /// The database a sign-in opens. <c>Database:Use</c> wins when set; otherwise the address the browser used decides:
+    /// a <c>Database:ProductionHosts</c> entry opens the Production database, anything else the development one. An entry
+    /// without a port ("35.196.141.157", "app.finishgenius.net") matches that address on every port; an entry with a port
+    /// ("host:9001") matches only that port.
     /// </summary>
     public DatabaseTarget ForHost(HostString host)
     {
+        if (Forced is { } forced) return forced;
         var production = All.FirstOrDefault(d => d.Production);
         var development = Default.Production ? All.FirstOrDefault(d => !d.Production) ?? Default : Default;
         if (production == null || !host.HasValue) return development;
@@ -108,9 +128,13 @@ public class DatabaseSelector(IHttpContextAccessor http, DatabaseCatalog catalog
         if (ctx.User.Identity?.IsAuthenticated == true)
         {
             var key = ctx.User.FindFirst(DatabaseCatalog.Claim)?.Value;
-            if (key == null) return catalog.Default; // sessions opened before the database choice existed
-            return catalog.Find(key) ?? throw new ApiException(StatusCodes.Status401Unauthorized,
+            if (key == null) return catalog.Forced ?? catalog.Default; // sessions opened before the database choice existed
+            var session = catalog.Find(key) ?? throw new ApiException(StatusCodes.Status401Unauthorized,
                 "The database for this session is no longer configured. Please sign in again.");
+            // Database:Use was changed after this session signed in: send the user back to sign-in.
+            if (catalog.Forced is { } forced && !forced.Key.Equals(session.Key, StringComparison.OrdinalIgnoreCase))
+                throw new ApiException(StatusCodes.Status401Unauthorized, $"This site now uses the {forced.Label} database. Please sign in again.");
+            return session;
         }
 
         return catalog.ForHost(ctx.Request.Host);

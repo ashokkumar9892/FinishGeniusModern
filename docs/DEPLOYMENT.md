@@ -76,7 +76,7 @@ Browse to `http://<VM external IP>/` and sign in (`admin` / the `Seed:AdminPassw
   },
   "Jwt": { "Key": "<long random secret, 32+ chars — keep the same value across servers/restarts>" },
   "Seed": { "AdminPassword": "<initial admin password, used only when no users exist>" },
-  "Database": { "Default": "Dev", "ProductionHosts": [ "35.196.141.157", "app.finishgenius.net" ], "AutoMigrate": true, "SeedDemoData": false },
+  "Database": { "Use": "Production", "Default": "Dev", "ProductionHosts": [ "35.196.141.157", "app.finishgenius.net" ], "AutoMigrate": true, "SeedDemoData": false },
   "Storage": { "Root": "D:\\FinishGeniusData", "LegacyRoot": "" }
 }
 ```
@@ -84,6 +84,7 @@ Browse to `http://<VM external IP>/` and sign in (`admin` / the `Seed:AdminPassw
 | Setting | Meaning |
 |---|---|
 | `Databases:<Key>` | The configured databases. There is no picker on the sign-in page: the database comes from the site address (see `Database:ProductionHosts`). `Label` is what users see, `Production: true` adds the live-data warning and an amber header badge. A lone `ConnectionStrings:Default` still works (one "Dev" database). |
+| `Database:Use` | **The simple switch:** `"Production"` (or `"Prod"`) makes every sign-in on this site use the Production database, `"Development"` (or `"Dev"`) the development one — whatever address people use. Leave it empty to decide by address (`Database:ProductionHosts`). Takes effect without a restart; people signed in to the other database are asked to sign in again. |
 | `Database:ProductionHosts` | Site addresses that sign in to the `Production: true` database; every other address signs in to the development one (`Database:Default`, or the first non-production database). An entry without a port matches that address on every port, so `35.196.141.157`, `35.196.141.157:9001` and `app.finishgenius.net` all open Production; an entry written as `"host:port"` matches only that port. |
 | `Databases:<Key>:AutoMigrate` | Create/update that database's `fg` schema on startup (default = `Database:AutoMigrate`; always off for `Legacy` databases). |
 | `Databases:<Key>:Legacy` | `true` = use the old Finish Genius database as-is: the app reads and writes the old `dbo` tables directly (shared with the old site, which keeps working; passwords are stored as bcrypt so both sites accept them). It never creates `fg` tables and is never migrated. Features the old tables cannot hold are refused with a message. Mapping: `Data/LegacyModel*.cs`. Prod is configured this way. |
