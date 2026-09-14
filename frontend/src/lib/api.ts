@@ -16,7 +16,7 @@ export const tokenStore = {
 
 const DATABASE_KEY = 'fg.database'
 
-/** Database picked on the sign-in page (Dev / Prod), remembered for the next sign-in. */
+/** Database of the last sign-in (Dev / Prod; the server picks it from the site address), so a switch can reset the selected group. */
 export const databaseStore = {
   get: () => localStorage.getItem(DATABASE_KEY),
   set: (key: string) => localStorage.setItem(DATABASE_KEY, key),

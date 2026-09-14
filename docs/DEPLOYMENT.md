@@ -76,14 +76,15 @@ Browse to `http://<VM external IP>/` and sign in (`admin` / the `Seed:AdminPassw
   },
   "Jwt": { "Key": "<long random secret, 32+ chars — keep the same value across servers/restarts>" },
   "Seed": { "AdminPassword": "<initial admin password, used only when no users exist>" },
-  "Database": { "Default": "Dev", "AutoMigrate": true, "SeedDemoData": false },
+  "Database": { "Default": "Dev", "ProductionHosts": [ "35.196.141.157", "app.finishgenius.net" ], "AutoMigrate": true, "SeedDemoData": false },
   "Storage": { "Root": "D:\\FinishGeniusData", "LegacyRoot": "" }
 }
 ```
 
 | Setting | Meaning |
 |---|---|
-| `Databases:<Key>` | Databases offered on the sign-in page (only shown when there are 2+). `Label` is what users see, `Production: true` adds the live-data warning and an amber header badge. A lone `ConnectionStrings:Default` still works (one "Dev" database). |
+| `Databases:<Key>` | The configured databases. There is no picker on the sign-in page: the database comes from the site address (see `Database:ProductionHosts`). `Label` is what users see, `Production: true` adds the live-data warning and an amber header badge. A lone `ConnectionStrings:Default` still works (one "Dev" database). |
+| `Database:ProductionHosts` | Site addresses that sign in to the `Production: true` database; every other address signs in to the development one (`Database:Default`, or the first non-production database). An entry without a port matches only ports 80/443, so `35.196.141.157` is Production and `35.196.141.157:9001` is Development; add `"host:port"` to match a specific port. |
 | `Databases:<Key>:AutoMigrate` | Create/update that database's `fg` schema on startup (default = `Database:AutoMigrate`; always off for `Legacy` databases). |
 | `Databases:<Key>:Legacy` | `true` = use the old Finish Genius database as-is: the app reads and writes the old `dbo` tables directly (shared with the old site, which keeps working; passwords are stored as bcrypt so both sites accept them). It never creates `fg` tables and is never migrated. Features the old tables cannot hold are refused with a message. Mapping: `Data/LegacyModel*.cs`. Prod is configured this way. |
 | `Database:Default` | Database used when none is chosen (and by the command-line tools without `--db`). |

@@ -9,20 +9,16 @@ namespace FinishGenius.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me, DatabaseCatalog databases, DatabaseSelector database,
+public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me, DatabaseSelector database,
     OwnerAccount owner, PageAccessService access) : ControllerBase
 {
     public record LoginRequest(string Username, string Password, bool RememberMe);
     public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
-    /// <summary>Databases offered on the sign-in page (connection details never leave the server).</summary>
-    [HttpGet("databases")]
+    /// <summary>The database a sign-in from this address opens (connection details never leave the server).</summary>
+    [HttpGet("database")]
     [AllowAnonymous]
-    public IActionResult Databases() => Ok(new
-    {
-        Databases = databases.All.Select(d => new { d.Key, d.Label, d.Production }),
-        Default = databases.Default.Key,
-    });
+    public IActionResult SignInDatabase() => Ok(new { database.Current.Key, database.Current.Label, database.Current.Production });
 
     [HttpPost("login")]
     [AllowAnonymous]

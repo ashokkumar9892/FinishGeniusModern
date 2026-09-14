@@ -6,7 +6,7 @@ import type { GroupRef, Lookups, Me } from './types'
 interface AuthState {
   me: Me | undefined
   loading: boolean
-  login: (username: string, password: string, remember: boolean, database?: string) => Promise<void>
+  login: (username: string, password: string, remember: boolean) => Promise<void>
   logout: () => void
   refresh: () => Promise<unknown>
 }
@@ -27,21 +27,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   })
 
   const login = useCallback(
-    async (username: string, password: string, remember: boolean, database?: string) => {
+    async (username: string, password: string, remember: boolean) => {
       tokenStore.clear() // a leftover session token would otherwise decide which database the sign-in goes to
-      const res = await api.post<{ token: string }>(
-        '/auth/login',
-        { username, password, rememberMe: remember },
-        database ? { headers: { 'X-FG-Database': database } } : undefined,
-      )
-      if (database) {
-        if (database !== databaseStore.get()) localStorage.removeItem(GROUP_KEY) // group ids differ between databases
-        databaseStore.set(database)
-      }
+      // The server picks the database from the address the site was opened on.
+      const res = await api.post<{ token: string }>('/auth/login', { username, password, rememberMe: remember })
       tokenStore.set(res.data.token, remember)
       qc.clear()
+      const me = await qc.fetchQuery({ queryKey: ['me'], queryFn: () => api.get<Me>('/auth/me').then((r) => r.data) })
+      if (me.database.key !== databaseStore.get()) localStorage.removeItem(GROUP_KEY) // group ids differ between databases
+      databaseStore.set(me.database.key)
       setHasToken(true)
-      await qc.fetchQuery({ queryKey: ['me'], queryFn: () => api.get<Me>('/auth/me').then((r) => r.data) })
     },
     [qc],
   )

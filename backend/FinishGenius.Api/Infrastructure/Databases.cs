@@ -24,8 +24,6 @@ public class DatabaseTarget
 /// </summary>
 public class DatabaseCatalog
 {
-    /// <summary>Sign-in request header naming the database to open the session on.</summary>
-    public const string Header = "X-FG-Database";
     /// <summary>JWT claim carrying the session's database key.</summary>
     public const string Claim = "db";
 
@@ -56,6 +54,30 @@ public class DatabaseCatalog
             throw new InvalidOperationException("No database is configured. Copy appsettings.Local.example.json to appsettings.Local.json and fill in \"Databases\".");
         All = list;
         Default = Find(config["Database:Default"]) ?? list[0];
+        _productionHosts = config.GetSection("Database:ProductionHosts").Get<string[]>() ?? [];
+    }
+
+    private readonly string[] _productionHosts;
+
+    /// <summary>
+    /// The database a sign-in opens, decided by the address the browser used: a <c>Database:ProductionHosts</c> entry
+    /// opens the Production database, anything else the development one. An entry without a port ("app.finishgenius.net")
+    /// matches only the default ports 80/443, so "35.196.141.157" is Production while "35.196.141.157:9001" is not.
+    /// </summary>
+    public DatabaseTarget ForHost(HostString host)
+    {
+        var production = All.FirstOrDefault(d => d.Production);
+        var development = Default.Production ? All.FirstOrDefault(d => !d.Production) ?? Default : Default;
+        if (production == null || !host.HasValue) return development;
+
+        var port = host.Port ?? 0;
+        var isProduction = _productionHosts.Any(entry =>
+        {
+            var e = HostString.FromUriComponent(entry.Trim());
+            if (!e.Host.Equals(host.Host, StringComparison.OrdinalIgnoreCase)) return false;
+            return e.Port.HasValue ? e.Port == port : port is 0 or 80 or 443;
+        });
+        return isProduction ? production : development;
     }
 
     public DatabaseTarget? Find(string? key) =>
@@ -66,8 +88,8 @@ public class DatabaseCatalog
 }
 
 /// <summary>
-/// Which database the current request works on: the session token's "db" claim, otherwise (sign-in) the
-/// <see cref="DatabaseCatalog.Header"/> header, otherwise the default. Command-line tools and startup pick one with <see cref="Use"/>.
+/// Which database the current request works on: the session token's "db" claim, otherwise (sign-in) the one for the
+/// address the browser used (<see cref="DatabaseCatalog.ForHost"/>). Command-line tools and startup pick one with <see cref="Use"/>.
 /// </summary>
 public class DatabaseSelector(IHttpContextAccessor http, DatabaseCatalog catalog)
 {
@@ -90,8 +112,6 @@ public class DatabaseSelector(IHttpContextAccessor http, DatabaseCatalog catalog
                 "The database for this session is no longer configured. Please sign in again.");
         }
 
-        var requested = ctx.Request.Headers[DatabaseCatalog.Header].ToString();
-        if (string.IsNullOrWhiteSpace(requested)) return catalog.Default;
-        return catalog.Find(requested) ?? throw ApiException.Bad($"Unknown database \"{requested}\".");
+        return catalog.ForHost(ctx.Request.Host);
     }
 }

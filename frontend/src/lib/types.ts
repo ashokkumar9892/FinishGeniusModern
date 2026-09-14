@@ -26,7 +26,7 @@ export interface Me {
   hiddenTabs?: string[]
 }
 
-/** A database the user can sign in to (GET /auth/databases). */
+/** The database a sign-in opens (GET /auth/database), chosen by the server from the site address. */
 export interface DatabaseRef {
   key: string
   label: string
