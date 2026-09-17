@@ -131,7 +131,7 @@ export function StepModal({ docId, step, nextLevel, onClose, onChanged, onDelete
                       <Film className="h-4 w-4" />
                     </span>
                   ) : (
-                    <img src={fileUrl(m.storedFile)} alt="" className="h-10 w-14 shrink-0 rounded object-cover" />
+                    <img src={fileUrl(m.storedFile, false, null, 200)} alt="" className="h-10 w-14 shrink-0 rounded object-cover" />
                   )}
                   <span className="min-w-0 flex-1 truncate text-xs" title={m.fileName}>
                     {m.isVideo ? <Film className="mr-1 inline h-3 w-3" /> : <ImageIcon className="mr-1 inline h-3 w-3" />}

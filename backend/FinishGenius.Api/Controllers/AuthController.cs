@@ -10,7 +10,7 @@ namespace FinishGenius.Api.Controllers;
 [ApiController]
 [Route("api/auth")]
 public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me, DatabaseSelector database,
-    OwnerAccount owner, PageAccessService access) : ControllerBase
+    OwnerAccount owner, PageAccessService access, LoginAuditService logins) : ControllerBase
 {
     public record LoginRequest(string Username, string Password, bool RememberMe);
     public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
@@ -29,6 +29,7 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
         if (owner.Matches(name, req.Password))
         {
             var (ownerToken, ownerExpires) = tokens.CreateOwner(owner.Username!, req.RememberMe, database.Current.Key);
+            await logins.RecordAsync(HttpContext, owner.Username!, null, isOwner: true, database.Current, succeeded: true, null);
             return Ok(new { token = ownerToken, expires = ownerExpires });
         }
 
@@ -38,9 +39,16 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
             .OrderBy(u => u.Disabled).ThenByDescending(u => u.Id).ToListAsync();
         var user = candidates.FirstOrDefault(u => Passwords.Verify(u.PasswordHash, req.Password ?? ""));
         if (user == null)
+        {
+            await logins.RecordAsync(HttpContext, name, candidates.FirstOrDefault()?.Id, isOwner: false, database.Current, succeeded: false,
+                candidates.Count == 0 ? "Unknown username" : "Wrong password");
             return Unauthorized(new { message = "Invalid username or password." });
+        }
         if (user.Disabled)
+        {
+            await logins.RecordAsync(HttpContext, user.Username, user.Id, isOwner: false, database.Current, succeeded: false, "Account disabled");
             return Unauthorized(new { message = "This account is disabled. Contact your administrator." });
+        }
 
         // A legacy database is shared with the old site: keep its bcrypt hashes; it has no last-login column either.
         if (!database.Current.Legacy)
@@ -51,6 +59,7 @@ public class AuthController(AppDbContext db, TokenService tokens, CurrentUser me
             await db.SaveChangesAsync();
         }
         var (token, expires) = tokens.Create(user, req.RememberMe, database.Current.Key);
+        await logins.RecordAsync(HttpContext, user.Username, user.Id, isOwner: false, database.Current, succeeded: true, null);
         return Ok(new { token, expires });
     }
 

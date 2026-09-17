@@ -280,9 +280,10 @@ function PhotoCard({ photo, activeTags, onOpen, onEdit, onDelete, onTag }: {
           </div>
         ) : (
           <img
-            src={fileUrl(photo.storedFile)}
+            src={fileUrl(photo.storedFile, false, null, 600)} // a card is ~300px wide; the full picture opens in the lightbox
             alt={photo.name}
             loading="lazy"
+            decoding="async"
             onError={() => setBroken(true)}
             className="h-auto w-full transition-transform duration-300 group-hover:scale-[1.02]"
           />
@@ -473,7 +474,7 @@ function EditModal({ photo, suggestions, onClose, onDone }: {
     >
       <form id="photo-edit" onSubmit={submit} className="space-y-4">
         <ErrorBanner message={error} />
-        <img src={fileUrl(photo.storedFile)} alt={photo.name} className="mx-auto max-h-56 rounded-md border object-contain" />
+        <img src={fileUrl(photo.storedFile, false, null, 400)} alt={photo.name} className="mx-auto max-h-56 rounded-md border object-contain" />
         <Field label="Name" required>
           <input className="input" value={name} maxLength={400} onChange={(e) => setName(e.target.value)} autoFocus />
         </Field>

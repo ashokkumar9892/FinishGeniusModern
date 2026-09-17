@@ -3,11 +3,15 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from '@/lib/auth'
+import { preloadRoute } from '@/lib/preload'
 import { ToastProvider } from '@/components/toast'
 import App from './App'
 import './index.css'
 
 document.documentElement.dataset.theme = localStorage.getItem('fg.theme') ?? 'light'
+
+// Fetch the opened page's own code alongside the session check instead of after it.
+preloadRoute(location.pathname)
 
 const queryClient = new QueryClient({
   defaultOptions: {

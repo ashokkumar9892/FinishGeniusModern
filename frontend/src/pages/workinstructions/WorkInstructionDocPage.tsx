@@ -712,7 +712,7 @@ function StepCard({ step, edit, busy, onEdit, onCopy, onDelete, onOpenImage }: {
                     onClick={() => onOpenImage(m)}
                     title={m.fileName}
                   >
-                    <img src={fileUrl(m.storedFile)} alt={m.fileName} loading="lazy" className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                    <img src={fileUrl(m.storedFile, false, null, 600)} alt={m.fileName} loading="lazy" className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-105" />
                   </button>
                 ),
               )}

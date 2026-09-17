@@ -33,7 +33,7 @@ export function DocThumb({ doc, onClick, className }: { doc: DocumentRow; onClic
   const size = className ?? 'h-12 w-16'
   const body =
     docKind(doc) === 'image' && doc.storedFile && !broken ? (
-      <img src={fileUrl(doc.storedFile)} alt="" loading="lazy" onError={() => setBroken(true)} className={clsx('rounded-md border object-cover bg-muted shrink-0', size)} />
+      <img src={fileUrl(doc.storedFile, false, null, 200)} alt="" loading="lazy" onError={() => setBroken(true)} className={clsx('rounded-md border object-cover bg-muted shrink-0', size)} />
     ) : (
       <FileTypeTile name={doc.fileName || doc.storedFile} className={size} />
     )

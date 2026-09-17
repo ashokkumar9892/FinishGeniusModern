@@ -13,14 +13,51 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null)
 
+const ME_KEY = 'fg.me'
+
+/**
+ * The signed-in user as the server last described them, kept next to the session token. It is tied to the token
+ * that produced it (a different sign-in, user or database means a different token), and it is only ever a head
+ * start: /auth/me is always asked again, and its answer replaces this one.
+ */
+const cachedMe = {
+  stamp: () => (tokenStore.get() ?? '').slice(-24),
+  load: (): Me | undefined => {
+    try {
+      const raw = localStorage.getItem(ME_KEY)
+      if (!raw) return undefined
+      const { stamp, me } = JSON.parse(raw) as { stamp: string; me: Me }
+      return stamp && stamp === cachedMe.stamp() ? me : undefined
+    } catch {
+      return undefined
+    }
+  },
+  save: (me: Me) => {
+    try {
+      localStorage.setItem(ME_KEY, JSON.stringify({ stamp: cachedMe.stamp(), me }))
+    } catch {
+      /* private mode / full storage: the app just waits for /auth/me as before */
+    }
+  },
+  clear: () => localStorage.removeItem(ME_KEY),
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient()
   const [hasToken, setHasToken] = useState(() => !!tokenStore.get())
 
   const meQuery = useQuery({
     queryKey: ['me'],
-    queryFn: () => api.get<Me>('/auth/me').then((r) => r.data),
+    queryFn: async () => {
+      const me = (await api.get<Me>('/auth/me')).data
+      cachedMe.save(me)
+      return me
+    },
     enabled: hasToken,
+    // The last answer opens the page while a fresh one is on its way, so a page's own data is requested at the
+    // same time as the session check instead of a round trip later. Roles and groups still come from the server.
+    initialData: cachedMe.load,
+    initialDataUpdatedAt: 0,
     staleTime: 60_000,
     refetchInterval: 120_000, // keeps the unread-message badge fresh
     retry: false,
@@ -34,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       tokenStore.set(res.data.token, remember)
       qc.clear()
       const me = await qc.fetchQuery({ queryKey: ['me'], queryFn: () => api.get<Me>('/auth/me').then((r) => r.data) })
+      cachedMe.save(me)
       if (me.database.key !== databaseStore.get()) localStorage.removeItem(GROUP_KEY) // group ids differ between databases
       databaseStore.set(me.database.key)
       setHasToken(true)
@@ -43,6 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     tokenStore.clear()
+    cachedMe.clear()
     localStorage.removeItem(GROUP_KEY)
     setHasToken(false)
     qc.clear()

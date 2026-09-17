@@ -35,6 +35,8 @@ export const moduleRoles = {
   settings: [SystemAdmin],
   /** Page Access: no role — only the owner account, which bypasses this matrix. */
   access: [],
+  /** Login Activity (sign-in log): owner account only, like Page Access. */
+  loginActivity: [],
 } as const
 
 export type ModuleKey = keyof typeof moduleRoles

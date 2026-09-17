@@ -60,3 +60,20 @@ docs/                           documentation
 - Print views: the Layout hides sidebar/header when printing; add `no-print` to controls and use `window.print()`.
 - Must work at phone width (tables scroll horizontally, use `hideBelow` on secondary columns).
 - Use `@/` imports. No `any` unless unavoidable. `npx tsc -b` must pass with zero errors.
+
+## Keeping pages fast
+
+A page should be usable in about a second and never take more than two. What holds that up:
+
+- **Nothing is sent uncompressed or fetched twice.** The API compresses responses (brotli/gzip, `Program.cs`; sign-in
+  answers are left alone), files under `/assets` are served `immutable` because Vite puts a content hash in their names,
+  and `index.html` is always revalidated. Never add a hashed asset path that is not under `/assets`.
+- **A page asks for its own data immediately.** The signed-in user is kept next to the session token (`fg.me`), so the
+  app renders from it while `/auth/me` is on its way — a page's queries no longer queue behind the session check. Roles
+  and page access still come from the server, and the server enforces them regardless.
+- **The page's code is already there.** `@/lib/preload` starts the route's script alongside the session check, and menu
+  hovers fetch the next page's. A new route added to `App.tsx` belongs in `preload.ts` too.
+- **Pictures are sent at the size they are shown.** `fileUrl(path, false, null, 600)` asks `/api/files` for a thumbnail
+  (made once, cached on disk); only the lightbox and downloads get the original. Grids also use `loading="lazy"`.
+- **Measure before changing anything.** Time the real screen (a headless browser against the running site) and look at
+  response sizes, not only at how long a query takes: a one-megabyte list is slow on a phone however fast SQL was.

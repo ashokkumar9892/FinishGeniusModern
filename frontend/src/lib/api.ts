@@ -52,13 +52,18 @@ export function errorMessage(err: unknown): string {
   return 'Something went wrong.'
 }
 
-/** URL for a stored file (images/videos/downloads cannot send the auth header). */
-export function fileUrl(path?: string | null, download = false, fileName?: string | null): string {
+/**
+ * URL for a stored file (images/videos/downloads cannot send the auth header).
+ * `width` asks for a picture shrunk to that many pixels wide — what a grid or a preview actually shows, instead of
+ * the several megabytes a camera produced. The server sends the original where it cannot make a smaller one.
+ */
+export function fileUrl(path?: string | null, download = false, fileName?: string | null, width?: number): string {
   if (!path) return ''
   const token = tokenStore.get() ?? ''
   const base = import.meta.env.BASE_URL.replace(/\/$/, '')
   const dl = download ? `&download=1${fileName ? `&name=${encodeURIComponent(fileName)}` : ''}` : ''
-  return `${base}/api/files/${path}?access_token=${encodeURIComponent(token)}${dl}`
+  const size = width && !download ? `&w=${width}` : ''
+  return `${base}/api/files/${path}?access_token=${encodeURIComponent(token)}${dl}${size}`
 }
 
 /** Triggers a browser download of an authenticated API response (Excel exports, templates). */

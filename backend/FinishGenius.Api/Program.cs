@@ -1,5 +1,7 @@
+using System.IO.Compression;
 using System.Text.Json.Serialization;
 using FinishGenius.Api.Data;
+using Microsoft.AspNetCore.ResponseCompression;
 using FinishGenius.Api.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
@@ -73,8 +75,13 @@ builder.Services.AddScoped<CurrentUser>();
 builder.Services.AddScoped<AuditService>();
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddSingleton<FileStorage>();
+builder.Services.AddSingleton<Thumbnails>();
 builder.Services.AddSingleton<PageAccessService>();
 builder.Services.AddSingleton<OwnerAccount>();
+// Sign-in log (dbo.FG_LoginAudit on the Production database by default; LoginAudit section in appsettings).
+builder.Services.AddHttpClient(nameof(IpGeolocator), c => c.Timeout = TimeSpan.FromSeconds(3));
+builder.Services.AddSingleton<IpGeolocator>();
+builder.Services.AddSingleton<LoginAuditService>();
 builder.Services.AddScoped<FinishGenius.Api.Services.ScheduleCalculator>();
 builder.Services.AddScoped<FinishGenius.Api.Services.GroupCopyService>();
 builder.Services.AddScoped<FinishGenius.Api.Services.DeviceCommandService>();
@@ -89,6 +96,18 @@ builder.Services.AddControllers().AddJsonOptions(o =>
     o.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
     o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.Never;
 });
+
+// Pages send large JSON lists (a process step builder is over a megabyte) and the browser downloads the app's
+// scripts on the first visit: compressing both is what keeps a page under two seconds away from the server.
+builder.Services.AddResponseCompression(o =>
+{
+    o.EnableForHttps = true;
+    o.Providers.Add<BrotliCompressionProvider>();
+    o.Providers.Add<GzipCompressionProvider>();
+    o.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(["application/json", "image/svg+xml", "application/manifest+json"]);
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
 
 var app = builder.Build();
 
@@ -143,8 +162,23 @@ foreach (var target in databases.All.Where(d => d.AutoMigrate))
     }
 }
 
+// Sign-in answers carry the session token and are tiny, so they are sent as they are: compressing a response that
+// mixes a secret with anything a caller supplied is the shape of attack (BREACH) that compression over TLS invites.
+app.UseWhen(ctx => !ctx.Request.Path.StartsWithSegments("/api/auth"), b => b.UseResponseCompression());
+
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        // Vite puts a content hash in every file name under /assets, so a browser never needs to ask about them again.
+        // Everything else (index.html, the logo) is revalidated, so a new build shows up right away.
+        var path = ctx.Context.Request.Path.Value ?? "";
+        ctx.Context.Response.Headers.CacheControl = path.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase)
+            ? "public, max-age=31536000, immutable"
+            : "no-cache";
+    },
+});
 app.UseAuthentication();
 app.UseMiddleware<PageAccessMiddleware>(); // pages the owner turned off; the owner account itself does not write data
 app.UseAuthorization();
@@ -162,6 +196,7 @@ app.MapFallback(async ctx =>
     if (File.Exists(index))
     {
         ctx.Response.ContentType = "text/html";
+        ctx.Response.Headers.CacheControl = "no-cache"; // the shell names the current build's scripts
         await ctx.Response.SendFileAsync(index);
     }
     else

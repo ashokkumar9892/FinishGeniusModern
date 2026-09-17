@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   BookOpen, Building2, Calculator, CalendarRange, ChevronsLeft, ChevronsRight, ClipboardCheck, Database, DollarSign, FlaskConical,
-  HardDrive, HelpCircle, Images, KeyRound, Layers, LayoutDashboard, ListOrdered, LogOut, Mail, Menu, Moon, Package, ShieldCheck, Sun, Tags, Upload, UserCog, Users,
+  HardDrive, HelpCircle, Images, KeyRound, Layers, LayoutDashboard, ListOrdered, LogIn, LogOut, Mail, Menu, Moon, Package, ShieldCheck, Sun, Tags, Upload, UserCog, Users,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth, useGroup } from '@/lib/auth'
 import { canAccess, isSystemAdmin, type ModuleKey } from '@/lib/access'
+import { preloadRoute } from '@/lib/preload'
 import { SearchSelect } from './SearchSelect'
 import { AgreementModal } from './AgreementModal'
 
@@ -53,6 +54,7 @@ export const navSections: { title: string; items: NavItem[] }[] = [
       { to: '/import', label: 'Import', icon: <Upload />, module: 'import' },
       { to: '/settings', label: 'System Settings', icon: <HardDrive />, module: 'settings' },
       { to: '/access', label: 'Page Access', icon: <ShieldCheck />, module: 'access' },
+      { to: '/login-activity', label: 'Login Activity', icon: <LogIn />, module: 'loginActivity' },
     ],
   },
 ]
@@ -128,6 +130,8 @@ export function Layout() {
                   <NavLink
                     to={i.to}
                     onClick={() => setMobileOpen(false)}
+                    onMouseEnter={() => preloadRoute(i.to)} // the page's code is there before the click
+                    onFocus={() => preloadRoute(i.to)}
                     title={collapsed ? i.label : undefined}
                     className={({ isActive }) =>
                       clsx(

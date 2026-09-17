@@ -79,7 +79,7 @@ export default function GroupsPage() {
       cell: (g) => (
         <div className="flex items-center gap-2.5 min-w-[160px]">
           {g.logoFile ? (
-            <img src={fileUrl(g.logoFile)} alt="" className="h-8 w-8 shrink-0 rounded border bg-white object-contain" loading="lazy" />
+            <img src={fileUrl(g.logoFile, false, null, 200)} alt="" className="h-8 w-8 shrink-0 rounded border bg-white object-contain" loading="lazy" />
           ) : (
             <span className="h-8 w-8 shrink-0 rounded bg-muted grid place-items-center text-muted-foreground">
               <Building2 className="h-4 w-4" />

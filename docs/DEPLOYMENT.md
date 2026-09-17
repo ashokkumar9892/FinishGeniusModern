@@ -153,6 +153,23 @@ Production is the old site's database used as-is (`"Legacy": true`, mapping in `
 - The owner has no user record, so it does not change business data: write calls other than sign-in, Page Access and
   System Settings are refused. Use a regular account for day-to-day work.
 
+### Login Activity (sign-in log)
+
+- The owner account also sees **Administration → Login Activity**: every sign-in attempt with the user name, result,
+  IP address, location, database, device and time. No other account can open the page or its API (403).
+- Attempts are written to one table, `dbo.FG_LoginAudit`, on the database named by `LoginAudit:Database`
+  (`"Prod"` by default) — whichever database the person actually signed in to, so the list is complete in one place.
+  The table is created automatically the first time it is needed; `database/FG_LoginAudit.sql` has the same statement.
+  It is the only table the app adds to the legacy Production database.
+- Failures are recorded too, with the reason (unknown username, wrong password, disabled account). Nothing here can
+  stop a sign-in: if the log cannot be written, the sign-in still succeeds and the problem goes to the application log.
+- The location comes from the free ip-api.com service, which the server calls over HTTP with the IP address only.
+  Private and loopback addresses are labelled "Local network" without any call, and results are cached. Set
+  `"LoginAudit": { "GeoLookup": false }` to stop the outside call (IP addresses are still recorded), or
+  `"Enabled": false` to stop recording altogether.
+- Behind IIS or a load balancer the visitor's address is read from `X-Forwarded-For` / `X-Real-IP`; make sure the
+  proxy sets one of them, or every row shows the proxy's own address.
+
 ### Pointing at a different database / importing legacy data
 
 - To use another database, change `ConnectionStrings:Default` in `appsettings.Local.json` and recycle the app pool —
