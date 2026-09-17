@@ -43,11 +43,16 @@ public class MaterialsController(AppDbContext db, CurrentUser me, AuditService a
             VendorName = db.Vendors.Where(v => v.Id == m.VendorId).Select(v => v.VendorName).FirstOrDefault(),
             OnHand = db.InventoryTransactions.Where(t => t.MaterialId == m.Id).Sum(t => (decimal?)t.Quantity) ?? 0,
         }).OrderByDescending(m => m.Id).ToListAsync();
+        // On the old site's database the stored name can start with spaces, which its tables sort first; keep that order available.
+        var sortNames = db is LegacyAppDbContext
+            ? await q.Select(m => new { m.Id, Name = EF.Property<string>(m, LegacyModel.SortNameProperty) }).ToDictionaryAsync(x => x.Id, x => x.Name)
+            : null;
         return Ok(rows.Select(m => new
         {
             m.Id, m.GroupId, m.GroupName, m.MaterialType, MaterialTypeLabel = MaterialTypes.Label((MaterialType)m.MaterialType),
             m.CategoryId, m.CategoryName, m.ProductCode, m.ProductName, m.Density, m.Price, m.Voc, m.Hap, m.Tap,
             m.MinQuantity, m.OnHand, m.VendorId, m.VendorName, m.Notes, m.CreatedAt, m.UpdatedAt,
+            SortName = sortNames?.GetValueOrDefault(m.Id) ?? m.ProductName,
         }));
     }
 

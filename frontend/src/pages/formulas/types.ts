@@ -111,6 +111,8 @@ export interface MaterialOption {
   tap: number
   minQuantity: number
   onHand: number
+  /** Name as stored (old site's sort order); falls back to productName. */
+  sortName?: string
 }
 
 export interface CategoryOption {

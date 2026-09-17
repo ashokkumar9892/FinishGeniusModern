@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AxiosError } from 'axios'
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Calculator, Droplets, Eye, FileSpreadsheet, FileText, FlaskConical, History, Lock, MinusCircle,
-  Plus, PlusCircle, Printer, RefreshCw, RotateCcw, Save, Scale, Send, Tag, Trash2, Undo2, XSquare,
+  PlusCircle, Printer, RefreshCw, RotateCcw, Save, Scale, Send, Tag, Trash2, Undo2, XSquare,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { api, download, errorMessage } from '@/lib/api'
@@ -16,6 +16,7 @@ import { SearchSelect } from '@/components/SearchSelect'
 import { EntityDocuments } from '@/components/EntityDocuments'
 import { useToast } from '@/components/toast'
 import { CompositionDonut } from './CompositionDonut'
+import { MaterialTables } from './MaterialTables'
 import { PrintDeniedModal, StatusBadge } from './FormulaModals'
 import { FormulaPrintView, type PrintData, type PrintMode } from './FormulaPrintView'
 import { DispensingModal, FormulaHistoryModal, NozzleConfirmModal, RecalcAmountModal, SelectLocationModal, type DispenseMaterial } from './WorkspaceModals'
@@ -138,8 +139,16 @@ function validate(h: HeaderState, lines: Line[], requireNumber: boolean, require
 }
 
 /** Number input with an optional unit prefix/suffix ($, %, g). */
-function NumInput({ value, onChange, prefix, suffix, invalid, placeholder, className, autoFocus, ariaLabel, onBlur, onEnter, readOnly }: {
+/** A stored gram amount as the old site shows it: at most 4 decimals ("97.62044…" → "97.6204"). */
+const gramsText = (v: string) => {
+  const n = Number(v)
+  return v.trim() !== '' && Number.isFinite(n) && (v.split('.')[1]?.length ?? 0) > 4 ? String(Math.round(n * 10000) / 10000) : v
+}
+
+function NumInput({ value, onChange, prefix, suffix, invalid, placeholder, className, autoFocus, ariaLabel, onBlur, onEnter, readOnly, format }: {
   value: string
+  /** How the value reads while the field is not being edited; editing always shows (and keeps) the full value. */
+  format?: (v: string) => string
   onChange: (v: string) => void
   prefix?: string
   suffix?: string
@@ -152,19 +161,24 @@ function NumInput({ value, onChange, prefix, suffix, invalid, placeholder, class
   onEnter?: () => void
   readOnly?: boolean
 }) {
+  const [editing, setEditing] = useState(false)
   return (
     <div className={clsx('relative', className)}>
       {prefix && <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{prefix}</span>}
       <input
         className={clsx('input tabular-nums', prefix && 'pl-6', suffix && 'pr-9', invalid && 'input-invalid', readOnly && 'bg-muted/50')}
         inputMode="decimal"
-        value={value}
+        value={format && !editing ? format(value) : value}
         placeholder={placeholder}
         autoFocus={autoFocus}
+        onFocus={() => setEditing(true)}
         aria-label={ariaLabel}
         readOnly={readOnly}
         onChange={(e) => onChange(e.target.value)}
-        onBlur={onBlur}
+        onBlur={() => {
+          setEditing(false)
+          onBlur?.()
+        }}
         onKeyDown={(e) => e.key === 'Enter' && onEnter?.()}
       />
       {suffix && <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{suffix}</span>}
@@ -238,10 +252,6 @@ export default function FormulaEditPage() {
   const [completeAttempt, setCompleteAttempt] = useState(false)
   const [moveTo, setMoveTo] = useState<number | null>(null)
   // picker
-  const [pickType, setPickType] = useState<number>(0)
-  const [pickMaterial, setPickMaterial] = useState<number | null>(null)
-  const [pickQty, setPickQty] = useState('')
-  const [pickBatch, setPickBatch] = useState('')
   const [rowAdd, setRowAdd] = useState<Record<string, string>>({})
   // batch size / reweigh
   const [batchDraft, setBatchDraft] = useState<string | null>(null)
@@ -421,21 +431,7 @@ export default function FormulaEditPage() {
 
   // ---------------- ingredients
   const inFormula = useMemo(() => new Set(lines.map((l) => l.materialId)), [lines])
-  const materialOptions = useMemo(
-    () =>
-      (materialsQ.data ?? [])
-        .filter((m) => INGREDIENT_TYPES.includes(m.materialType) && !inFormula.has(m.id) && (pickType === 0 || m.materialType === pickType))
-        .sort((a, b) => a.productName.localeCompare(b.productName))
-        .map((m) => ({
-          value: m.id,
-          label: m.productName,
-          sub: [m.materialTypeLabel, m.categoryName, m.productCode, `${num(m.density, 3)} lb/gal`, `${money(m.price)}/gal`].filter(Boolean).join(' · '),
-        })),
-    [materialsQ.data, inFormula, pickType],
-  )
-  const pickedMaterial = materialsQ.data?.find((m) => m.id === pickMaterial)
-  const pickBatches = pickedMaterial ? batchesFor(pickedMaterial.id) : []
-
+  const pickable = useMemo(() => (materialsQ.data ?? []).filter((m) => INGREDIENT_TYPES.includes(m.materialType)), [materialsQ.data])
   const addLine = (m: MaterialOption, grams: number, batchNumber: string | null) => {
     const key = nextKey()
     setLines((ls) => [
@@ -450,25 +446,34 @@ export default function FormulaEditPage() {
     setLastAdded(key)
   }
 
-  async function addFromPicker() {
-    const m = pickedMaterial
-    if (!m) return toast.error('Please select a material to add.')
-    let grams = parseNum(pickQty)
-    if (pickQty.trim() && (grams === null || grams <= 0)) return toast.error(`Invalid Number entered [${pickQty}]`)
-    const list = batchesFor(m.id)
-    if (grams === null) {
-      if (!scaleId) return toast.error('Please enter grams')
-      grams = await takeWeight()
-      if (grams === null) return
+  /** A "+" in the Base / Pigments / Dyes tables. An empty Qty takes the weight from the selected scale. */
+  async function addFromTable(m: MaterialOption, qty: string, batchNumber: string | null): Promise<boolean> {
+    if (locked) {
+      toast.error(COMPLETE_LOCKED)
+      return false
     }
-    const batch = pickBatch ? list.find((b) => b.batchNumber === pickBatch) ?? null : latestBatch(m.id)
-    if (batch && m.density > 0 && gallonsOf(grams, m.density) > batch.onHand) return toast.error('The selected batch does not have enough material.')
+    let grams = parseNum(qty)
+    if (qty.trim() && (grams === null || grams <= 0)) {
+      toast.error(`Invalid Number entered [${qty}]`)
+      return false
+    }
+    if (grams === null) {
+      if (!scaleId) {
+        toast.error('Please enter grams')
+        return false
+      }
+      grams = await takeWeight()
+      if (grams === null) return false
+    }
+    const batch = batchNumber ? batchesFor(m.id).find((b) => b.batchNumber === batchNumber) ?? null : null
+    if (batch && m.density > 0 && gallonsOf(grams, m.density) > batch.onHand) {
+      toast.error('The selected batch does not have enough material.')
+      return false
+    }
     addLine(m, grams, batch?.batchNumber ?? null)
-    setPickMaterial(null)
-    setPickQty('')
-    setPickBatch('')
     toast.success('Material was successfully added to the color formula.')
     if (!isNew) setAutoSave({})
+    return true
   }
 
   async function addToRow(l: Line) {
@@ -975,7 +980,8 @@ export default function FormulaEditPage() {
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px]">
+      {/* The side panel sits beside the formula only on very wide screens: the colour formula table needs the full width, as on the old page. */}
+      <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-5">
           {/* Devices: scale, dispense machine, label printer (legacy top bar) */}
           {hasDevices && ws && (
@@ -1052,69 +1058,26 @@ export default function FormulaEditPage() {
             }
             bodyClassName="p-0"
           >
-            {/* Material picker: Base Materials / Pigments / Dyes (+ Products) with Qty and batch, like the legacy three tables. */}
+            {/* Material picker: the old page's Base Materials / Pigments / Dyes tables, each with Search, Qty, batch and "+". */}
             <div className="space-y-2 border-b p-3">
               {locked && (
                 <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
                   <Lock className="h-4 w-4 shrink-0" /> {COMPLETE_LOCKED}
                 </div>
               )}
-              <div className="inline-flex flex-wrap rounded-md border bg-muted/40 p-0.5" role="group" aria-label="Material type">
-                {[
-                  { v: 0, l: 'All' },
-                  { v: 1, l: 'Base Materials' },
-                  { v: 2, l: 'Pigments' },
-                  { v: 3, l: 'Dyes' },
-                  { v: 7, l: 'Products' },
-                ].map((o) => (
-                  <button
-                    key={o.v}
-                    type="button"
-                    aria-pressed={pickType === o.v}
-                    onClick={() => setPickType(o.v)}
-                    className={clsx('h-7 rounded px-2.5 text-xs font-medium', pickType === o.v ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
-                  >
-                    {o.l}
-                  </button>
-                ))}
-              </div>
-              <div className="flex flex-col gap-2 md:flex-row md:items-start">
-                <SearchSelect
-                  className="flex-1"
-                  options={materialOptions}
-                  value={pickMaterial}
-                  onChange={(v) => {
-                    setPickMaterial(v)
-                    setPickBatch('')
-                  }}
-                  placeholder={materialsQ.isLoading ? 'Loading materials…' : locked ? COMPLETE_LOCKED : 'Search materials to add to the formula'}
-                  disabled={materialsQ.isLoading || gid <= 0 || locked}
-                  emptyText={materialsQ.data ? 'No matching materials (already added materials are hidden)' : 'No results found'}
-                />
-                {usesBatches && pickedMaterial && (
-                  <select className="input md:w-52" value={pickBatch} onChange={(e) => setPickBatch(e.target.value)} aria-label="Batch #">
-                    {pickBatches.length === 0 ? (
-                      <option value="">No Inventory Setup</option>
-                    ) : (
-                      <option value="">Latest batch (#{pickBatches[pickBatches.length - 1].batchNumber})</option>
-                    )}
-                    {pickBatches.map((b) => (
-                      <option key={b.batchNumber} value={b.batchNumber}>
-                        #{b.batchNumber} - {num(b.onHand, 2)} Gal
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <NumInput className="md:w-36" value={pickQty} onChange={setPickQty} suffix="g" placeholder={scale ? (scale.unit === 'kg' ? 'KiloGrams' : 'Grams') : 'Grams'} ariaLabel="Qty" onEnter={() => void addFromPicker()} />
-                <button
-                  className="btn-primary"
-                  onClick={() => void addFromPicker()}
-                  disabled={!pickMaterial || !!scaleBusy || locked}
-                  title={lockTitle ?? (scaleId ? 'Leave Qty empty to take the weight from the scale' : undefined)}
-                >
-                  <Plus className="h-4 w-4" /> Add
-                </button>
-              </div>
+              <MaterialTables
+                materials={pickable}
+                loading={materialsQ.isLoading}
+                inFormula={inFormula}
+                usesBatches={usesBatches}
+                batchesFor={batchesFor}
+                pigmentPct={pct(sums.pigment)}
+                dyePct={pct(sums.dye)}
+                disabled={gid <= 0 || locked || !!scaleBusy}
+                disabledTitle={lockTitle}
+                qtyPlaceholder={scale ? (scale.unit === 'kg' ? 'KiloGrams' : 'Grams') : 'Grams'}
+                onAdd={addFromTable}
+              />
               {materialsQ.isError && <div className="text-xs text-destructive">{errorMessage(materialsQ.error)}</div>}
               {missingDensity.length > 0 && (
                 <Note>
@@ -1139,14 +1102,14 @@ export default function FormulaEditPage() {
                       <th className="th text-right">Grams</th>
                       <th className="th text-right">%</th>
                       <th className="th text-right">Fl Oz</th>
-                      <th className="th hidden text-right xl:table-cell">$/gal</th>
-                      <th className="th hidden text-right lg:table-cell">Cost</th>
+                      <th className="th hidden text-right 2xl:table-cell">$/gal</th>
+                      <th className="th hidden text-right 2xl:table-cell">Cost</th>
                       {showAddColumn && <th className="th">Add Material</th>}
                       <th className="th w-10" title="Remove Material" />
                       {usesBatches && !isNew && (
                         <>
-                          <th className="th text-right">Amount to Dispense {scale ? `(${scale.unit})` : '(g)'}</th>
-                          <th className="th text-right">Total Dispensed (g)</th>
+                          <th className="th w-24 whitespace-normal text-right leading-tight">Amount to Dispense {scale ? `(${scale.unit})` : '(g)'}</th>
+                          <th className="th w-24 whitespace-normal text-right leading-tight">Total Dispensed (g)</th>
                           <th className="th text-center">Dispense</th>
                         </>
                       )}
@@ -1245,6 +1208,7 @@ export default function FormulaEditPage() {
                             <NumInput
                               className="ml-auto w-28"
                               value={l.grams}
+                              format={gramsText}
                               onChange={(v) => updateGrams(l.key, v)}
                               suffix="g"
                               invalid={!!err}
@@ -1258,8 +1222,8 @@ export default function FormulaEditPage() {
                           <td className={clsx('td text-right tabular-nums', oz === null && 'text-destructive')} title={oz === null ? 'No density (lb/gal) for this material' : undefined}>
                             {oz === null ? 'Error' : num(oz, 4)}
                           </td>
-                          <td className="td hidden text-right tabular-nums xl:table-cell">{money(l.price)}</td>
-                          <td className="td hidden text-right tabular-nums lg:table-cell">{money(gal * l.price)}</td>
+                          <td className="td hidden text-right tabular-nums 2xl:table-cell">{money(l.price)}</td>
+                          <td className="td hidden text-right tabular-nums 2xl:table-cell">{money(gal * l.price)}</td>
                           {showAddColumn && (
                             <td className="td">
                               <div className="flex items-center gap-1">
@@ -1339,8 +1303,8 @@ export default function FormulaEditPage() {
                       <td className="td text-right tabular-nums">{num(totals.totalGrams, 2)} g</td>
                       <td className="td text-right tabular-nums">{totals.totalGrams > 0 ? '100%' : '—'}</td>
                       <td className="td text-right tabular-nums">{num(totals.totalGallons * 128, 2)}</td>
-                      <td className="td hidden xl:table-cell" />
-                      <td className="td hidden text-right tabular-nums lg:table-cell">{money(totals.materialCost)}</td>
+                      <td className="td hidden 2xl:table-cell" />
+                      <td className="td hidden text-right tabular-nums 2xl:table-cell">{money(totals.materialCost)}</td>
                       {showAddColumn && <td className="td" />}
                       <td className="td" />
                       {usesBatches && !isNew && (
@@ -1601,7 +1565,7 @@ export default function FormulaEditPage() {
         </div>
 
         {/* Summary */}
-        <aside className="space-y-5 lg:sticky lg:top-4 lg:self-start">
+        <aside className="space-y-5 2xl:sticky 2xl:top-4 2xl:self-start">
           <Card title="Summary" bodyClassName="p-4 pt-2">
             <div className="divide-y">
               <SummaryRow label="Total weight" value={`${num(totals.totalGrams, 2)} g`} hint={`${num(totals.totalPounds, 3)} lb`} />

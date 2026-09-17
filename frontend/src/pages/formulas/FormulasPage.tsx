@@ -66,6 +66,8 @@ export default function FormulasPage() {
     queryKey: ['formulas', groupId],
     queryFn: () => api.get<FormulaRow[]>('/formulas', { params: { groupId } }).then((r) => r.data),
     enabled: groupId > 0,
+    // The old site writes to the same formulas: coming back to this tab shows the ones added there in the meantime.
+    refetchOnWindowFocus: true,
   })
   const settings = useQuery({
     queryKey: ['dispense-settings', groupId],

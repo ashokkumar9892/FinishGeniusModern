@@ -29,6 +29,8 @@ public class FormulaWorkspaceController(AppDbContext db, CurrentUser me, AuditSe
     public record PrintLabelRequest(int? PrinterDeviceId, bool CustomerLabel);
 
     private static readonly MaterialType[] LocationTypes = [MaterialType.Base, MaterialType.Pigment, MaterialType.Dye];
+    /// <summary>What the formula editor's material tables list (same as the frontend's INGREDIENT_TYPES).</summary>
+    private static readonly MaterialType[] PickerTypes = [MaterialType.Base, MaterialType.Pigment, MaterialType.Dye, MaterialType.Product];
     private const string DispensedFirst = "Please Record & Reset or revert your dispense operation.";
 
     // ------------------------------------------------------------------ workspace
@@ -60,7 +62,12 @@ public class FormulaWorkspaceController(AppDbContext db, CurrentUser me, AuditSe
         }).ToList();
 
         var pref = me.Id == 0 ? null : await db.FormulaDevicePreferences.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == me.Id && p.FormulaId == id);
-        var batches = await InventoryBatches.ForMaterialsAsync(db, f.Ingredients.Select(i => i.MaterialId));
+        // Batches for every material the Base / Pigments / Dyes tables offer, not only the formula's own lines: like the old
+        // site, each row shows its batch dropdown before the material is added.
+        var offered = await db.Materials.AsNoTracking()
+            .Where(m => m.GroupId == f.GroupId && !m.IsDeleted && PickerTypes.Contains(m.MaterialType))
+            .Select(m => m.Id).ToListAsync();
+        var batches = await InventoryBatches.ForMaterialsAsync(db, f.Ingredients.Select(i => i.MaterialId).Concat(offered));
         var locations = await db.MaterialLocations.AsNoTracking()
             .Where(l => l.GroupId == f.GroupId && !l.IsDeleted && LocationTypes.Contains(l.MaterialType))
             .OrderBy(l => l.Name).Select(l => new { l.Id, l.Name }).ToListAsync();

@@ -20,6 +20,8 @@ public static partial class LegacyModel
     public const string NotNullText = "Legacy:NotNullText";
     /// <summary>Value for a legacy-only NOT NULL column on insert: "@user" (signed-in user id), "@now" or a constant of the column's type.</summary>
     public const string InsertValue = "Legacy:InsertValue";
+    /// <summary>Shadow property on legacy materials: the product name as stored, for the old site's sort order.</summary>
+    public const string SortNameProperty = "SortName";
     /// <summary>Value saved instead of null for an optional app property whose legacy column is NOT NULL ("@user", "@now" or a constant).</summary>
     public const string NullDefault = "Legacy:NullDefault";
     /// <summary>Length of the legacy column: longer text is rejected with a readable message instead of a SQL error.</summary>
@@ -291,7 +293,8 @@ public static partial class LegacyModel
                    ISNULL(m.GramsPerCubicCentiMetres, 0) AS GramsPerCubicCentiMetres, ISNULL(m.PricePerGallon, ISNULL(m.FormulaCost, 0)) AS PricePerGallon,
                    ISNULL(m.VOC, 0) AS VOC, ISNULL(m.HAP, 0) AS HAP, ISNULL(m.TAP, 0) AS TAP, ISNULL(m.MinQuantity, 0) AS MinQuantity,
                    CAST(NULL AS int) AS VendorId, m.Notes, m.ColorCode, ISNULL(m.IsDeleted, 0) AS IsDeleted,
-                   ISNULL(m.MixedOn, CAST('2000-01-01' AS datetime)) AS CreatedAt, CAST(NULL AS datetime) AS UpdatedAt, m.Discriminator
+                   ISNULL(m.MixedOn, CAST('2000-01-01' AS datetime)) AS CreatedAt, CAST(NULL AS datetime) AS UpdatedAt, m.Discriminator,
+                   ISNULL(m.ManufacturersProductName, '') AS SortName
             FROM dbo.Materials m
             """);
         e.Property(x => x.Id).HasColumnName("ID");
@@ -307,6 +310,8 @@ public static partial class LegacyModel
         ReadOnly(e.Property(x => x.VendorId));   // the old site does not link materials to vendors
         ReadOnly(e.Property(x => x.CreatedAt));
         ReadOnly(e.Property(x => x.UpdatedAt));
+        // The name exactly as stored (leading spaces included): the old site's material tables sort on it.
+        ReadOnly(e.Property<string>(SortNameProperty));
         e.Property<string>("Discriminator").HasAnnotation(InsertValue, "SimpleMaterial");
     });
 
