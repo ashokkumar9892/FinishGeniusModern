@@ -47,7 +47,8 @@ powershell -ExecutionPolicy Bypass -File .\Install-IIS.ps1 -SiteName FinishGeniu
 
 The script:
 - enables IIS features, verifies the Hosting Bundle,
-- copies files to `C:\inetpub\FinishGenius` (on upgrades it **keeps** `App_Data` uploads, `logs` and
+- empties `wwwroot` first (so the previous build's hashed scripts do not stay behind) and copies files to
+  `C:\inetpub\FinishGenius` (on upgrades it **keeps** `App_Data` uploads, `logs` and
   `appsettings.Local.json` already on the server),
 - creates the app pool `FinishGenius` (*No Managed Code*, AlwaysRunning) and the website,
 - grants the app-pool identity *Modify* on `App_Data` and `logs`,
@@ -146,8 +147,11 @@ Production is the old site's database used as-is (`"Legacy": true`, mapping in `
   and recycle the app pool. Leave `Owner` out to have no owner account.
 - It signs in on the normal sign-in page (any database), sees every page, and is the only account that sees
   **Administration → Page Access**. There it turns pages and tabs off per role, one role or all roles at once. A role
-  never gets more than its built-in access. The switches are saved in `App_Data\page-access.json` (kept by
-  `Install-IIS.ps1`) and apply to every database; users see changes within two minutes.
+  never gets more than its built-in access. The switches are stored in the database
+  (`dbo.FG_PageAccess` on `PageAccess:Database` — the Production one unless set otherwise; the table is created on
+  first use, see `database/FG_PageAccess.sql`), so **a new build never resets them**. A copy is kept in
+  `App_Data\page-access.json`, used only if the database cannot be reached while the site starts. The switches apply
+  to every database; users see changes within two minutes.
 - Hidden pages disappear from the menu and their routes, and their own APIs refuse calls (403). APIs shared by several
   pages (materials, categories, documents, groups, files) stay open. Hidden tabs are hidden in the page.
 - The owner has no user record, so it does not change business data: write calls other than sign-in, Page Access and

@@ -99,28 +99,76 @@ public class PageAccessService
     public const string SettingsFile = "App_Data/page-access.json";
 
     private readonly string _path;
+    private readonly PageAccessStore _store;
     private readonly ILogger<PageAccessService> _log;
     private readonly object _writeLock = new();
     private volatile PageAccessSettings _settings;
 
-    public PageAccessService(IWebHostEnvironment env, ILogger<PageAccessService> log)
+    public PageAccessService(IWebHostEnvironment env, PageAccessStore store, ILogger<PageAccessService> log)
     {
         _log = log;
+        _store = store;
         _path = Path.Combine(env.ContentRootPath, SettingsFile);
-        _settings = Load();
+        _settings = LoadFromDatabase();
     }
 
-    private PageAccessSettings Load()
+    /// <summary>
+    /// The switches as stored in the database. A site that was set up before they moved there still has them in
+    /// App_Data/page-access.json: those are written to the database once, and the file then only serves as the copy
+    /// used when the database cannot be reached while the site starts.
+    /// </summary>
+    private PageAccessSettings LoadFromDatabase()
+    {
+        var stored = _store.Read();
+        if (stored == null)
+        {
+            var file = LoadFile();
+            _log.LogWarning("Page access could not be read from {Table}; using the copy in {Path}", PageAccessStore.TableName, _path);
+            return file;
+        }
+        if (stored.Length > 0) return Parse(stored, PageAccessStore.TableName) ?? new();
+
+        var fromFile = LoadFile();
+        if (fromFile.Pages.Count == 0 && fromFile.Tabs.Count == 0) return fromFile;
+        try
+        {
+            _store.Write(JsonSerializer.Serialize(fromFile, Json), fromFile.UpdatedBy ?? "");
+            _log.LogWarning("Page access moved from {Path} into {Table}: {Pages} pages and {Tabs} tabs restricted",
+                _path, PageAccessStore.TableName, fromFile.Pages.Count, fromFile.Tabs.Count);
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "Page access from {Path} could not be copied into {Table}", _path, PageAccessStore.TableName);
+        }
+        return fromFile;
+    }
+
+    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
+
+    private PageAccessSettings LoadFile()
     {
         try
         {
-            if (File.Exists(_path)) return JsonSerializer.Deserialize<PageAccessSettings>(File.ReadAllText(_path)) ?? new();
+            if (File.Exists(_path)) return Parse(File.ReadAllText(_path), _path) ?? new();
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             _log.LogError(e, "Page access settings {Path} could not be read; every page uses its built-in access", _path);
         }
         return new();
+    }
+
+    private PageAccessSettings? Parse(string json, string source)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<PageAccessSettings>(json);
+        }
+        catch (JsonException e)
+        {
+            _log.LogError(e, "Page access settings from {Source} could not be read; every page uses its built-in access", source);
+            return null;
+        }
     }
 
     /// <summary>Roles the page is on for.</summary>
@@ -186,18 +234,20 @@ public class PageAccessService
         }
         lock (_writeLock)
         {
+            var json = JsonSerializer.Serialize(settings, Json);
+            _store.Write(json, user); // the database decides: a new build never brings these along
             try
             {
+                // A copy on this machine, so the switches still apply if the database is unreachable at startup.
                 Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
                 var temp = _path + ".tmp";
-                File.WriteAllText(temp, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+                File.WriteAllText(temp, json);
                 File.Move(temp, _path, overwrite: true);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
-                _log.LogError(e, "Page access could not be saved to {Path}", _path);
-                throw ApiException.Bad($"Page access could not be saved to {_path}: {e.Message} " +
-                                       "Give the IIS application pool identity Modify permission on the site's App_Data folder.");
+                _log.LogWarning(e, "Page access was saved to {Table} but the local copy {Path} could not be written",
+                    PageAccessStore.TableName, _path);
             }
             _settings = settings;
         }

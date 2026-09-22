@@ -51,12 +51,33 @@ Step "Copying files to $SitePath"
 New-Item -ItemType Directory -Force $SitePath | Out-Null
 if (Get-Website -Name $SiteName -ErrorAction SilentlyContinue) { Stop-Website -Name $SiteName -ErrorAction SilentlyContinue }
 if (Test-Path "IIS:\AppPools\$SiteName") { Stop-WebAppPool -Name $SiteName -ErrorAction SilentlyContinue; Start-Sleep 3 }
-# Keep server-side data/config on upgrades
+# The site folder is made to match the package, EXCEPT for what belongs to this server and is never in a package:
+#   App_Data  - page-access.json, storage-settings.json and uploads (the Page Access and System Settings screens)
+#   logs      - stdout logs
+#   appsettings.Local.json / appsettings.Production.json - connection strings and keys
+# Mirroring also clears out files an older build left behind, which copying alone does not: scripts of a previous
+# build stayed in wwwroot\assets, and a second copy of wwwroot ended up inside the first one, so the server kept
+# serving the old screens.
 $keep = @('App_Data', 'logs', 'appsettings.Local.json', 'appsettings.Production.json')
-Get-ChildItem $PackagePath -Force | Where-Object { $_.Name -notin @('Install-IIS.ps1') } | ForEach-Object {
+foreach ($name in $keep) {
+  if (Test-Path (Join-Path $SitePath $name)) { Write-Host "  keeping this server's $name" }
+}
+# wwwroot is emptied first: every build gives its scripts new names, so the old ones would pile up, and copying a
+# folder onto an existing one of the same name puts it *inside* it (wwwroot\wwwroot) — the site then kept serving
+# the previous build's screens.
+$siteWeb = Join-Path $SitePath 'wwwroot'
+if (Test-Path $siteWeb) { Get-ChildItem $siteWeb -Force | Remove-Item -Recurse -Force }
+Get-ChildItem $PackagePath -Force | Where-Object { $_.Name -ne 'Install-IIS.ps1' } | ForEach-Object {
   $target = Join-Path $SitePath $_.Name
-  if ($_.Name -in $keep -and (Test-Path $target)) { Write-Host "  keeping existing $($_.Name)"; return }
-  Copy-Item $_.FullName $target -Recurse -Force
+  if ($_.Name -in $keep -and (Test-Path $target)) { return }
+  if ($_.PSIsContainer) {
+    # The folder's *contents* are copied, so an existing folder is filled instead of being nested inside itself.
+    New-Item -ItemType Directory -Force $target | Out-Null
+    $inside = Get-ChildItem $_.FullName -Force
+    if ($inside) { Copy-Item $inside.FullName $target -Recurse -Force }
+  } else {
+    Copy-Item $_.FullName $target -Force
+  }
 }
 New-Item -ItemType Directory -Force (Join-Path $SitePath 'App_Data\uploads'), (Join-Path $SitePath 'logs') | Out-Null
 

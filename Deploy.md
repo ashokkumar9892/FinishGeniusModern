@@ -56,12 +56,27 @@ The script:
 - enables IIS features and checks for the Hosting Bundle
 - copies the files to `C:\inetpub\FinishGenius` (keeps the existing `App_Data`, `logs` and `appsettings.Local.json`;
   sections that are new in the package's `appsettings.Local.json`, e.g. `Owner`, are added to the server's file,
-  existing values are never changed, and a `.bak-` copy is kept)
+  existing values are never changed, and a `.bak-` copy is kept). `wwwroot` is emptied first, so the previous
+  build's scripts are gone and browsers get the new screens
 - creates the app pool **FinishGenius** (No Managed Code, AlwaysRunning) and the website
 - grants the app pool **Modify** rights on `App_Data` and `logs`
 - opens the Windows Firewall port and calls `/api/health`
 
 ## 5. Manual IIS setup (alternative to the script)
+
+> **Upgrading by hand? Do not replace these — they belong to the server, and no package contains them:**
+>
+> | Keep | What is in it |
+> |------|----------------|
+> | `appsettings.Local.json` | Connection strings, JWT key, owner account |
+> | `App_Data\storage-settings.json` | The upload folders set in **System Settings** |
+> | `App_Data\uploads\` | Uploaded files, when `Storage:Root` is left empty |
+> | `logs\` | stdout logs |
+>
+> **Page Access** is not a file: it is stored in the database (`dbo.FG_PageAccess`, see `database/FG_PageAccess.sql`),
+> so replacing the site's files never resets it.
+>
+> Delete the site's `wwwroot` before copying the new one, or the previous build's scripts stay behind.
 
 1. Copy the contents of `publish\FinishGenius\` to `C:\inetpub\FinishGenius`.
 2. **IIS Manager → Application Pools → Add Application Pool**

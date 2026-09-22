@@ -76,6 +76,7 @@ builder.Services.AddScoped<AuditService>();
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddSingleton<FileStorage>();
 builder.Services.AddSingleton<Thumbnails>();
+builder.Services.AddSingleton<PageAccessStore>();
 builder.Services.AddSingleton<PageAccessService>();
 builder.Services.AddSingleton<OwnerAccount>();
 // Sign-in log (dbo.FG_LoginAudit on the Production database by default; LoginAudit section in appsettings).
