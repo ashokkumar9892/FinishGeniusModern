@@ -104,13 +104,7 @@ export function StatusBadge({ status, className }: { status: string; className?:
   const released = status.toUpperCase().startsWith('RELEASED')
   return (
     <span
-      className={clsx(
-        'badge whitespace-nowrap font-semibold tracking-wide',
-        released
-          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300'
-          : 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
-        className,
-      )}
+      className={clsx('badge-status', released ? 'badge-status-ok' : 'badge-status-warn', className)}
     >
       {status}
     </span>

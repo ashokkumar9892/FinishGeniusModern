@@ -29,6 +29,8 @@
     --sidebar-muted: 215 16% 62%;
     --sidebar-border: 220 22% 20%;
     --sidebar-accent: 22 92% 52%;
+    --status-ok: 152 62% 30%;
+    --status-warn: 30 92% 32%;
   }
   [data-theme='dark'] {
     --background: 222 30% 9%;
@@ -50,6 +52,8 @@
     --sidebar: 222 32% 8%;
     --sidebar-border: 220 20% 16%;
     --sidebar-muted: 215 16% 58%;
+    --status-ok: 152 55% 55%;
+    --status-warn: 40 95% 60%;
   }
   /* Maximum contrast, for people who cannot read the ordinary palettes (see lib/appearance.ts). */
   [data-theme='contrast'] {
@@ -75,6 +79,8 @@
     --sidebar-muted: 0 0% 82%;
     --sidebar-border: 0 0% 55%;
     --sidebar-accent: 22 100% 52%;
+    --status-ok: 152 75% 58%;
+    --status-warn: 45 100% 62%;
   }
   [data-theme='contrast-light'] {
     --background: 0 0% 100%;
@@ -99,6 +105,8 @@
     --sidebar-muted: 0 0% 85%;
     --sidebar-border: 0 0% 45%;
     --sidebar-accent: 22 100% 40%;
+    --status-ok: 152 85% 20%;
+    --status-warn: 28 100% 26%;
   }
   * { @apply border-border; }
   html, body, #root { height: 100%; }
@@ -143,6 +151,8 @@
     --success: 152 62% 32%;
     --border: 214 18% 84%;
     --input: 214 18% 78%;
+    --status-ok: 152 62% 30%;
+    --status-warn: 30 92% 32%;
   }
 }
 
@@ -168,6 +178,14 @@
   .label { @apply block text-xs font-semibold text-foreground/80 mb-1; }
   .card { @apply rounded-lg border border-border bg-card text-card-foreground shadow-card; }
   .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium; }
+  /*
+   * Status words (Complete / Incomplete, Released / Draft) are coloured type, not tinted pills: a pale fill behind
+   * small text on the white data grids made the words look smudged. The colour comes from the palette in force —
+   * on a white panel inside a dark appearance that is the panel's own light palette, so it never washes out.
+   */
+  .badge-status { @apply inline-flex items-center whitespace-nowrap text-xs font-semibold tracking-wide; }
+  .badge-status-ok { color: hsl(var(--status-ok)); }
+  .badge-status-warn { color: hsl(var(--status-warn)); }
   .tab { @apply px-3 py-2 text-sm font-medium text-muted-foreground border-b-2 border-transparent hover:text-foreground whitespace-nowrap; }
   .tab-active { @apply text-primary border-primary; }
   .th { @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap; }
