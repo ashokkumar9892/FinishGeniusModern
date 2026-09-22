@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   BookOpen, Building2, Calculator, CalendarRange, ChevronsLeft, ChevronsRight, ClipboardCheck, Database, DollarSign, FlaskConical,
-  HardDrive, HelpCircle, Images, KeyRound, Layers, LayoutDashboard, ListOrdered, LogIn, LogOut, Mail, Menu, Moon, Package, ShieldCheck, Sun, Tags, Upload, UserCog, Users,
+  Check, HardDrive, HelpCircle, Images, KeyRound, Layers, LayoutDashboard, ListOrdered, LogIn, LogOut, Mail, Menu, Package, Palette, ShieldCheck, Tags, Upload, UserCog, Users,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth, useGroup } from '@/lib/auth'
 import { canAccess, isSystemAdmin, type ModuleKey } from '@/lib/access'
+import { APPEARANCES, applyAppearance, storedAppearance } from '@/lib/appearance'
 import { preloadRoute } from '@/lib/preload'
 import { SearchSelect } from './SearchSelect'
 import { AgreementModal } from './AgreementModal'
@@ -60,7 +61,6 @@ export const navSections: { title: string; items: NavItem[] }[] = [
 ]
 
 const NAV_KEY = 'finish-genius.nav'
-const THEME_KEY = 'fg.theme'
 
 /** The official Finish Genius PRO badge (public/brand/fg-logo.png, 149×120). */
 export const logoSrc = import.meta.env.BASE_URL + 'brand/fg-logo.png'
@@ -86,13 +86,13 @@ function useClickOutside(onOutside: () => void) {
   return ref
 }
 
-function Dropdown({ trigger, children }: { trigger: ReactNode; children: (close: () => void) => ReactNode }) {
+function Dropdown({ trigger, width = 'w-60', children }: { trigger: ReactNode; width?: string; children: (close: () => void) => ReactNode }) {
   const [open, setOpen] = useState(false)
   const ref = useClickOutside(() => setOpen(false))
   return (
     <div ref={ref} className="relative">
       <div onClick={() => setOpen((o) => !o)}>{trigger}</div>
-      {open && <div className="absolute right-0 mt-2 w-60 card shadow-xl p-1 z-40">{children(() => setOpen(false))}</div>}
+      {open && <div className={clsx('absolute right-0 mt-2 card shadow-xl p-1 z-40', width)}>{children(() => setOpen(false))}</div>}
     </div>
   )
 }
@@ -105,13 +105,10 @@ export function Layout() {
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(NAV_KEY) === 'collapsed')
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) ?? 'light')
+  const [appearance, setAppearance] = useState(storedAppearance)
 
   useEffect(() => localStorage.setItem(NAV_KEY, collapsed ? 'collapsed' : 'expanded'), [collapsed])
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    localStorage.setItem(THEME_KEY, theme)
-  }, [theme])
+  useEffect(() => applyAppearance(appearance), [appearance])
 
   if (!me) return null
   const initials = ((me.firstName?.[0] ?? '') + (me.lastName?.[0] ?? '') || me.username[0]).toUpperCase()
@@ -250,9 +247,41 @@ export function Layout() {
             </>
           )}
 
-          <button className="btn-icon" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} title="Toggle theme">
-            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </button>
+          <Dropdown
+            width="w-80"
+            trigger={
+              <button className="btn-icon" title="Background and colours" aria-label="Background and colours">
+                <Palette className="h-4 w-4" />
+              </button>
+            }
+          >
+            {(close) => (
+              <>
+                <div className="px-2.5 py-2 border-b mb-1">
+                  <div className="text-sm font-medium">Background</div>
+                  <div className="text-xs text-muted-foreground">Pick whatever is easiest to read.</div>
+                </div>
+                {APPEARANCES.map((a) => (
+                  <button
+                    key={a.key}
+                    className={clsx(menuItem, 'items-start', a.key === appearance.key && 'bg-muted')}
+                    aria-pressed={a.key === appearance.key}
+                    onClick={() => {
+                      setAppearance(a)
+                      close()
+                    }}
+                  >
+                    <span className="mt-0.5 h-5 w-5 shrink-0 rounded border border-border" style={{ background: a.swatch }} />
+                    <span className="min-w-0">
+                      <span className="block font-medium">{a.name}</span>
+                      <span className="block text-xs text-muted-foreground">{a.description}</span>
+                    </span>
+                    {a.key === appearance.key && <Check className="ml-auto mt-0.5 h-4 w-4 shrink-0 text-primary" />}
+                  </button>
+                ))}
+              </>
+            )}
+          </Dropdown>
 
           <Dropdown
             trigger={

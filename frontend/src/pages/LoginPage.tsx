@@ -67,7 +67,7 @@ export default function LoginPage() {
       </div>
 
       <div className="flex items-center justify-center p-6">
-        <form onSubmit={submit} className="w-full max-w-sm space-y-5">
+        <form onSubmit={submit} className="card w-full max-w-sm space-y-5 p-6">
           <div className="lg:hidden mb-6">
             <Logo />
           </div>
