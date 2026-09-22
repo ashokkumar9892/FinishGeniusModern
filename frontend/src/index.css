@@ -123,6 +123,27 @@
   html[data-appearance='elements'] body {
     background-color: transparent;
   }
+  /*
+   * Elements keeps the old site's arrangement: the picture and the page titles on it are dark, while every panel on
+   * top — data grids, forms, dialogs — is white with black text. Redefining the palette on the panel itself means
+   * everything inside it (tables, inputs, buttons, badges) turns light with it, and nothing outside changes.
+   */
+  html[data-appearance='elements'] .card {
+    --card: 0 0% 100%;
+    --card-foreground: 222 32% 12%;
+    --foreground: 222 32% 12%;
+    --muted: 214 20% 96%;
+    --muted-foreground: 215 16% 38%;
+    --secondary: 214 20% 96%;
+    --secondary-foreground: 222 25% 22%;
+    --accent: 24 90% 96%;
+    --accent-foreground: 22 80% 32%;
+    --primary: 22 92% 46%;
+    --destructive: 0 72% 45%;
+    --success: 152 62% 32%;
+    --border: 214 18% 84%;
+    --input: 214 18% 78%;
+  }
 }
 
 @layer components {

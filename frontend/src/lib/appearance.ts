@@ -22,7 +22,7 @@ export const APPEARANCES: Appearance[] = [
   {
     key: 'elements',
     name: 'Elements (dark)',
-    description: 'The Finish Genius background, as on the old site.',
+    description: 'The old site’s look: picture behind, white panels with black text.',
     theme: 'dark',
     image: elementsImage,
     swatch: `center / cover url(${elementsImage})`,
