@@ -21,6 +21,7 @@ export const moduleRoles = {
   photos: [FGPro, FGProPlus, GroupAdmin, SupportAgent, SystemAdmin],
   materials: [FGPro, GroupAdmin, SystemAdmin],
   formulas: [FGPro, GroupAdmin, SystemAdmin],
+  colorMatching: [FGPro, GroupAdmin, SystemAdmin],
   processSteps: [FGPro, GroupAdmin, SystemAdmin],
   processSchedules: [FGPro, GroupAdmin, SystemAdmin],
   materialQuantities: [FGPro, GroupAdmin, SystemAdmin],

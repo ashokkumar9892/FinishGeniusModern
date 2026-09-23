@@ -48,6 +48,7 @@ public static partial class LegacyModel
         PhotoGallery(b);
         Processes(b);
         WorkInstructionTables(b);
+        ColorSamples(b);
     }
 
     // ------------------------------------------------------------------ groups, users

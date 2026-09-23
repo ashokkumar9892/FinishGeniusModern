@@ -46,6 +46,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<PurgeFailure> PurgeFailures => Set<PurgeFailure>();
     public DbSet<PurgeSuccess> PurgeSuccesses => Set<PurgeSuccess>();
 
+    public DbSet<ColorSample> ColorSamples => Set<ColorSample>();
+
     public DbSet<IndustrySector> IndustrySectors => Set<IndustrySector>();
     public DbSet<SubStep> SubSteps => Set<SubStep>();
     public DbSet<SubStepPullDown> SubStepPullDowns => Set<SubStepPullDown>();
@@ -104,6 +106,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         b.Entity<WorkInstructionTrail>().Property(x => x.Log).HasMaxLength(4000);
         foreach (var p in new[] { "Purpose", "Scope", "Terminology", "Location" })
             b.Entity<WorkInstruction>().Property(p).HasMaxLength(4000);
+
+        b.Entity<ColorSample>().Property(x => x.Notes).HasMaxLength(4000);
+        b.Entity<ColorSample>().HasIndex(x => new { x.GroupId, x.WoodSpecies });
+        b.Entity<ColorSample>().HasIndex(x => x.FormulaId);
 
         b.Entity<Group>().HasIndex(x => x.Name);
         b.Entity<User>().HasIndex(x => x.Username);

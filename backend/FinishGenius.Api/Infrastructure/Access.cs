@@ -14,6 +14,8 @@ public static class Access
     public const string Users = $"{GA},{SA}";
     public const string Materials = $"{P},{GA},{SA}";
     public const string Formulas = $"{P},{GA},{SA}";
+    /// <summary>Colour matching: measured samples, matching a target colour, the stain preview.</summary>
+    public const string ColorMatching = $"{P},{GA},{SA}";
     public const string Process = $"{P},{GA},{SA}";
     public const string MyWork = $"{PP},{GA},{SA}";
     public const string Dashboard = $"{PP},{GA},{SA}";

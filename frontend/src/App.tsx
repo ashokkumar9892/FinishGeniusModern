@@ -17,6 +17,7 @@ const ImportPage = lazy(() => import('@/pages/materials/ImportPage'))
 const FormulasPage = lazy(() => import('@/pages/formulas/FormulasPage'))
 const FormulaEditPage = lazy(() => import('@/pages/formulas/FormulaEditPage'))
 const FormulaCalculatorPage = lazy(() => import('@/pages/formulas/FormulaCalculatorPage'))
+const ColorMatchingPage = lazy(() => import('@/pages/colors/ColorMatchingPage'))
 const SubStepsPage = lazy(() => import('@/pages/process/SubStepsPage'))
 const ProcessStepsPage = lazy(() => import('@/pages/process/ProcessStepsPage'))
 const ProcessStepBuilderPage = lazy(() => import('@/pages/process/ProcessStepBuilderPage'))
@@ -80,6 +81,7 @@ export default function App() {
           <Route path="formulas" element={g('formulas', <FormulasPage />)} />
           <Route path="formulas/:id" element={g('formulas', <FormulaEditPage />)} />
           <Route path="formulas/:id/calculator" element={g('formulas', <FormulaCalculatorPage />)} />
+          <Route path="color-matching" element={g('colorMatching', <ColorMatchingPage />)} />
           <Route path="sub-steps" element={g('subSteps', <SubStepsPage />)} />
           <Route path="process-steps" element={g('processSteps', <ProcessStepsPage />)} />
           <Route path="process-steps/:id" element={g('processSteps', <ProcessStepBuilderPage />)} />

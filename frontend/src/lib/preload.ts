@@ -14,6 +14,7 @@ const pages: Record<string, () => Promise<unknown>> = {
   '/material-categories': () => import('@/pages/materials/MaterialCategoriesPage'),
   '/import': () => import('@/pages/materials/ImportPage'),
   '/formulas': () => import('@/pages/formulas/FormulasPage'),
+  '/color-matching': () => import('@/pages/colors/ColorMatchingPage'),
   '/sub-steps': () => import('@/pages/process/SubStepsPage'),
   '/process-steps': () => import('@/pages/process/ProcessStepsPage'),
   '/process-schedules': () => import('@/pages/process/ProcessSchedulesPage'),

@@ -1,9 +1,12 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Source files are UTF-8. Without this the compiler reads the ones that have no byte-order mark in the machine's
+         ANSI code page, and every dash, arrow or Greek letter in a message reaches the screen as mojibake. -->
+    <CodePage>65001</CodePage>
   </PropertyGroup>
 
   <ItemGroup>

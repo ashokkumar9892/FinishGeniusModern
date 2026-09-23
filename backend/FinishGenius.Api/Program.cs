@@ -86,6 +86,8 @@ builder.Services.AddSingleton<LoginAuditService>();
 builder.Services.AddScoped<FinishGenius.Api.Services.ScheduleCalculator>();
 builder.Services.AddScoped<FinishGenius.Api.Services.GroupCopyService>();
 builder.Services.AddScoped<FinishGenius.Api.Services.DeviceCommandService>();
+builder.Services.AddScoped<FinishGenius.Api.Services.ColorMatchService>();
+builder.Services.AddSingleton<FinishGenius.Api.Services.PhotoColorService>();
 
 const long maxUpload = 250L * 1024 * 1024; // videos for work instructions
 builder.Services.Configure<FormOptions>(o => o.MultipartBodyLengthLimit = maxUpload);

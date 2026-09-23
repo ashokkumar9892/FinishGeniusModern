@@ -42,6 +42,7 @@ export const navSections: { title: string; items: NavItem[] }[] = [
     items: [
       { to: '/materials', label: 'Equipment & Materials', icon: <Package />, module: 'materials' },
       { to: '/formulas', label: 'Formulas', icon: <FlaskConical />, module: 'formulas' },
+      { to: '/color-matching', label: 'Color Matching', icon: <Palette />, module: 'colorMatching' },
       { to: '/photos', label: 'Photo Gallery', icon: <Images />, module: 'photos' },
     ],
   },
