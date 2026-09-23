@@ -1986,3 +1986,72 @@ END;
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923210014_ColorMatching'
+)
+BEGIN
+    CREATE TABLE [fg].[ColorSamples] (
+        [Id] int NOT NULL IDENTITY,
+        [Name] nvarchar(400) NOT NULL,
+        [WoodSpecies] nvarchar(400) NOT NULL,
+        [SandingGrit] int NULL,
+        [WoodL] float NULL,
+        [WoodA] float NULL,
+        [WoodB] float NULL,
+        [FormulaId] int NULL,
+        [FormulaName] nvarchar(400) NOT NULL,
+        [Concentration] float NULL,
+        [Method] int NULL,
+        [Coats] int NULL,
+        [WetFilmMils] float NULL,
+        [FlashMinutes] int NULL,
+        [Sealer] nvarchar(400) NULL,
+        [Topcoat] nvarchar(400) NULL,
+        [Sheen] float NULL,
+        [FinalL] float NOT NULL,
+        [FinalA] float NOT NULL,
+        [FinalB] float NOT NULL,
+        [Source] int NOT NULL,
+        [MeasuredAt] datetime2 NULL,
+        [PhotoFile] nvarchar(400) NULL,
+        [Notes] nvarchar(4000) NULL,
+        [CreatedBy] int NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        [UpdatedAt] datetime2 NULL,
+        [IsDeleted] bit NOT NULL,
+        [GroupId] int NOT NULL,
+        CONSTRAINT [PK_ColorSamples] PRIMARY KEY ([Id]),
+        CONSTRAINT [FK_ColorSamples_Groups_GroupId] FOREIGN KEY ([GroupId]) REFERENCES [fg].[Groups] ([Id]) ON DELETE NO ACTION
+    );
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923210014_ColorMatching'
+)
+BEGIN
+    CREATE INDEX [IX_ColorSamples_FormulaId] ON [fg].[ColorSamples] ([FormulaId]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923210014_ColorMatching'
+)
+BEGIN
+    CREATE INDEX [IX_ColorSamples_GroupId_WoodSpecies] ON [fg].[ColorSamples] ([GroupId], [WoodSpecies]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923210014_ColorMatching'
+)
+BEGIN
+    INSERT INTO [fg].[__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20260923210014_ColorMatching', N'10.0.12');
+END;
+
+COMMIT;
+GO
+
