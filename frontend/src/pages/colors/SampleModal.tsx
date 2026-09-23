@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Save } from 'lucide-react'
+import clsx from 'clsx'
 import { api, errorMessage } from '@/lib/api'
 import { ErrorBanner, Field, Modal, Note } from '@/components/ui'
 import { SearchSelect } from '@/components/SearchSelect'
@@ -37,6 +38,16 @@ const empty: FormState = {
 }
 
 const num = (v: string) => (v.trim() === '' ? null : Number(v))
+
+/** A number typed into a box: empty is fine where the field is optional, letters never are. */
+const badNumber = (v: string, { required = false, min, max }: { required?: boolean; min?: number; max?: number } = {}) => {
+  if (v.trim() === '') return required ? 'Required.' : null
+  const n = Number(v)
+  if (!Number.isFinite(n)) return 'Numbers only.'
+  if (min != null && n < min) return `Must be ${min} or more.`
+  if (max != null && n > max) return `Must be ${max} or less.`
+  return null
+}
 
 /** Records one finished sample: the wood, the stain, how it went on, and what it measured. */
 export function SampleModal({ open, onClose, groupId, sample }: {
@@ -115,7 +126,22 @@ export function SampleModal({ open, onClose, groupId, sample }: {
     onError: (e) => setError(errorMessage(e)),
   })
 
-  const missingFinal = form.finalL.trim() === '' || form.finalA.trim() === '' || form.finalB.trim() === ''
+  // Every box that holds a number is checked here, so nothing typed by mistake reaches the database as a blank.
+  const errors: Record<string, string | null> = {
+    sandingGrit: badNumber(form.sandingGrit, { min: 0, max: 2000 }),
+    woodL: badNumber(form.woodL, { min: 0, max: 100 }),
+    woodA: badNumber(form.woodA, { min: -128, max: 128 }),
+    woodB: badNumber(form.woodB, { min: -128, max: 128 }),
+    concentration: badNumber(form.concentration, { min: 0, max: 100 }),
+    coats: badNumber(form.coats, { min: 0, max: 20 }),
+    wetFilmMils: badNumber(form.wetFilmMils, { min: 0 }),
+    flashMinutes: badNumber(form.flashMinutes, { min: 0 }),
+    sheen: badNumber(form.sheen, { min: 0, max: 100 }),
+    finalL: badNumber(form.finalL, { required: true, min: 0, max: 100 }),
+    finalA: badNumber(form.finalA, { required: true, min: -128, max: 128 }),
+    finalB: badNumber(form.finalB, { required: true, min: -128, max: 128 }),
+  }
+  const hasErrors = Object.values(errors).some(Boolean)
 
   return (
     <Modal
@@ -128,7 +154,7 @@ export function SampleModal({ open, onClose, groupId, sample }: {
           <button className="btn-secondary" onClick={onClose}>Cancel</button>
           <button
             className="btn-primary"
-            disabled={save.isPending || missingFinal || !form.woodSpecies.trim() || !(form.formulaId || form.formulaName.trim())}
+            disabled={save.isPending || hasErrors || !form.woodSpecies.trim() || !(form.formulaId || form.formulaName.trim())}
             onClick={() => save.mutate()}
           >
             <Save className="h-4 w-4" /> Save
@@ -145,18 +171,22 @@ export function SampleModal({ open, onClose, groupId, sample }: {
             <Field label="Species" required hint="Maple, Oak, Cherry…">
               <input className="input" value={form.woodSpecies} onChange={(e) => set('woodSpecies', e.target.value)} maxLength={100} />
             </Field>
-            <Field label="Sanded to (grit)">
-              <input className="input" inputMode="numeric" value={form.sandingGrit} onChange={(e) => set('sandingGrit', e.target.value)} />
+            <Field label="Sanded to (grit)" error={errors.sandingGrit ?? undefined}>
+              <input className={clsx('input', errors.sandingGrit && 'input-invalid')} inputMode="numeric" value={form.sandingGrit} onChange={(e) => set('sandingGrit', e.target.value)} />
             </Field>
             <Field label="Measured on">
               <input className="input" type="date" value={form.measuredAt} onChange={(e) => set('measuredAt', e.target.value)} />
             </Field>
           </div>
-          <Field label="Unfinished wood colour (L* a* b*)" hint="Optional, and worth doing: it lets the same formula be predicted on a different board.">
+          <Field
+            label="Unfinished wood colour (L* a* b*)"
+            hint="Optional, and worth doing: it lets the same formula be predicted on a different board."
+            error={[errors.woodL, errors.woodA, errors.woodB].find(Boolean) ?? undefined}
+          >
             <div className="grid grid-cols-3 gap-2">
-              <input className="input tabular-nums" placeholder="L*" value={form.woodL} onChange={(e) => set('woodL', e.target.value)} />
-              <input className="input tabular-nums" placeholder="a*" value={form.woodA} onChange={(e) => set('woodA', e.target.value)} />
-              <input className="input tabular-nums" placeholder="b*" value={form.woodB} onChange={(e) => set('woodB', e.target.value)} />
+              <input className={clsx('input tabular-nums', errors.woodL && 'input-invalid')} placeholder="L*" value={form.woodL} onChange={(e) => set('woodL', e.target.value)} />
+              <input className={clsx('input tabular-nums', errors.woodA && 'input-invalid')} placeholder="a*" value={form.woodA} onChange={(e) => set('woodA', e.target.value)} />
+              <input className={clsx('input tabular-nums', errors.woodB && 'input-invalid')} placeholder="b*" value={form.woodB} onChange={(e) => set('woodB', e.target.value)} />
             </div>
           </Field>
         </section>
@@ -182,8 +212,8 @@ export function SampleModal({ open, onClose, groupId, sample }: {
             </Field>
           </div>
           <div className="grid gap-3 sm:grid-cols-4">
-            <Field label="Strength (%)">
-              <input className="input tabular-nums" inputMode="decimal" value={form.concentration} onChange={(e) => set('concentration', e.target.value)} />
+            <Field label="Strength (%)" error={errors.concentration ?? undefined}>
+              <input className={clsx('input tabular-nums', errors.concentration && 'input-invalid')} inputMode="decimal" value={form.concentration} onChange={(e) => set('concentration', e.target.value)} />
             </Field>
             <Field label="Applied by">
               <select className="input" value={form.method} onChange={(e) => set('method', e.target.value)}>
@@ -191,16 +221,16 @@ export function SampleModal({ open, onClose, groupId, sample }: {
                 {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
             </Field>
-            <Field label="Coats">
-              <input className="input tabular-nums" inputMode="numeric" value={form.coats} onChange={(e) => set('coats', e.target.value)} />
+            <Field label="Coats" error={errors.coats ?? undefined}>
+              <input className={clsx('input tabular-nums', errors.coats && 'input-invalid')} inputMode="numeric" value={form.coats} onChange={(e) => set('coats', e.target.value)} />
             </Field>
-            <Field label="Wet film (mils)">
-              <input className="input tabular-nums" inputMode="decimal" value={form.wetFilmMils} onChange={(e) => set('wetFilmMils', e.target.value)} />
+            <Field label="Wet film (mils)" error={errors.wetFilmMils ?? undefined}>
+              <input className={clsx('input tabular-nums', errors.wetFilmMils && 'input-invalid')} inputMode="decimal" value={form.wetFilmMils} onChange={(e) => set('wetFilmMils', e.target.value)} />
             </Field>
           </div>
           <div className="grid gap-3 sm:grid-cols-4">
-            <Field label="Flash (minutes)">
-              <input className="input tabular-nums" inputMode="numeric" value={form.flashMinutes} onChange={(e) => set('flashMinutes', e.target.value)} />
+            <Field label="Flash (minutes)" error={errors.flashMinutes ?? undefined}>
+              <input className={clsx('input tabular-nums', errors.flashMinutes && 'input-invalid')} inputMode="numeric" value={form.flashMinutes} onChange={(e) => set('flashMinutes', e.target.value)} />
             </Field>
             <Field label="Sealer">
               <input className="input" value={form.sealer} onChange={(e) => set('sealer', e.target.value)} maxLength={200} />
@@ -208,8 +238,8 @@ export function SampleModal({ open, onClose, groupId, sample }: {
             <Field label="Topcoat">
               <input className="input" value={form.topcoat} onChange={(e) => set('topcoat', e.target.value)} maxLength={200} />
             </Field>
-            <Field label="Sheen (%)">
-              <input className="input tabular-nums" inputMode="decimal" value={form.sheen} onChange={(e) => set('sheen', e.target.value)} />
+            <Field label="Sheen (%)" error={errors.sheen ?? undefined}>
+              <input className={clsx('input tabular-nums', errors.sheen && 'input-invalid')} inputMode="decimal" value={form.sheen} onChange={(e) => set('sheen', e.target.value)} />
             </Field>
           </div>
         </section>
@@ -217,11 +247,16 @@ export function SampleModal({ open, onClose, groupId, sample }: {
         <section className="space-y-3">
           <h4 className="text-sm font-semibold">The finished colour</h4>
           <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-            <Field label="Measured L* a* b*" required>
+            <Field
+              label="Measured L* a* b*"
+              required
+              hint="L* 0-100 (dark to light), a* green-red, b* blue-yellow."
+              error={[errors.finalL, errors.finalA, errors.finalB].find(Boolean) ?? undefined}
+            >
               <div className="grid grid-cols-3 gap-2">
-                <input className="input tabular-nums" placeholder="L*" value={form.finalL} onChange={(e) => set('finalL', e.target.value)} />
-                <input className="input tabular-nums" placeholder="a*" value={form.finalA} onChange={(e) => set('finalA', e.target.value)} />
-                <input className="input tabular-nums" placeholder="b*" value={form.finalB} onChange={(e) => set('finalB', e.target.value)} />
+                <input className={clsx('input tabular-nums', errors.finalL && 'input-invalid')} placeholder="L*" value={form.finalL} onChange={(e) => set('finalL', e.target.value)} />
+                <input className={clsx('input tabular-nums', errors.finalA && 'input-invalid')} placeholder="a*" value={form.finalA} onChange={(e) => set('finalA', e.target.value)} />
+                <input className={clsx('input tabular-nums', errors.finalB && 'input-invalid')} placeholder="b*" value={form.finalB} onChange={(e) => set('finalB', e.target.value)} />
               </div>
             </Field>
             <Field label="Read from" required>
