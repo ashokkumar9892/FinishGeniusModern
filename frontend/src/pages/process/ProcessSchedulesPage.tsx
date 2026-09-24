@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, ArchiveRestore, Copy, CopyPlus, FileText, History, Pencil, Plus, Printer, Tag } from 'lucide-react'
+import {
+  Activity, Archive, ArchiveRestore, Copy, CopyPlus, FileText, History, Pencil, Plus, Printer, Tag } from 'lucide-react'
 import { api, errorMessage } from '@/lib/api'
 import { useGroup, useMe } from '@/lib/auth'
 import { isAdmin } from '@/lib/access'
@@ -148,6 +149,7 @@ export default function ProcessSchedulesPage() {
               <button className="btn-icon" title="Copy Master (with step edits)" onClick={() => setCopying({ row: r, master: true })}><CopyPlus className="h-4 w-4" /></button>
             </>
           )}
+          <button className="btn-icon" title="Process data (what was recorded on the floor)" onClick={() => navigate(`/process-data/${r.id}`)}><Activity className="h-4 w-4" /></button>
           <button className="btn-icon" title="Print" onClick={() => setPrinting(r)}><Printer className="h-4 w-4" /></button>
           <button className="btn-icon" title="History" onClick={() => setHistory(r)}><History className="h-4 w-4" /></button>
           {!r.isArchived && (

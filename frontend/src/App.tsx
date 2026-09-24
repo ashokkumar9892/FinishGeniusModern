@@ -23,6 +23,7 @@ const ProcessStepsPage = lazy(() => import('@/pages/process/ProcessStepsPage'))
 const ProcessStepBuilderPage = lazy(() => import('@/pages/process/ProcessStepBuilderPage'))
 const ProcessSchedulesPage = lazy(() => import('@/pages/process/ProcessSchedulesPage'))
 const ScheduleEditPage = lazy(() => import('@/pages/process/ScheduleEditPage'))
+const ProcessDataPage = lazy(() => import('@/pages/process/ProcessDataPage'))
 const MaterialQuantitiesPage = lazy(() => import('@/pages/process/MaterialQuantitiesPage'))
 const PricingPage = lazy(() => import('@/pages/process/PricingPage'))
 const MyWorkPage = lazy(() => import('@/pages/mywork/MyWorkPage'))
@@ -87,6 +88,7 @@ export default function App() {
           <Route path="process-steps/:id" element={g('processSteps', <ProcessStepBuilderPage />)} />
           <Route path="process-schedules" element={g('processSchedules', <ProcessSchedulesPage />)} />
           <Route path="process-schedules/:id" element={g('processSchedules', <ScheduleEditPage />)} />
+          <Route path="process-data/:id" element={g('dashboard', <ProcessDataPage />)} />
           <Route path="material-quantities" element={g('materialQuantities', <MaterialQuantitiesPage />)} />
           <Route path="pricing" element={g('pricing', <PricingPage />)} />
           <Route path="my-work" element={g('myWork', <MyWorkPage />)} />

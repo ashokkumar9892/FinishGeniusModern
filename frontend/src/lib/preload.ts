@@ -18,6 +18,7 @@ const pages: Record<string, () => Promise<unknown>> = {
   '/sub-steps': () => import('@/pages/process/SubStepsPage'),
   '/process-steps': () => import('@/pages/process/ProcessStepsPage'),
   '/process-schedules': () => import('@/pages/process/ProcessSchedulesPage'),
+  '/process-data': () => import('@/pages/process/ProcessDataPage'),
   '/material-quantities': () => import('@/pages/process/MaterialQuantitiesPage'),
   '/pricing': () => import('@/pages/process/PricingPage'),
   '/my-work': () => import('@/pages/mywork/MyWorkPage'),
@@ -33,6 +34,7 @@ const details: Record<string, () => Promise<unknown>> = {
   '/formulas': () => import('@/pages/formulas/FormulaEditPage'),
   '/process-steps': () => import('@/pages/process/ProcessStepBuilderPage'),
   '/process-schedules': () => import('@/pages/process/ScheduleEditPage'),
+  '/process-data': () => import('@/pages/process/ProcessDataPage'),
   '/my-work': () => import('@/pages/mywork/ExecutionPage'),
   '/work-instructions': () => import('@/pages/workinstructions/WorkInstructionDocPage'),
 }
