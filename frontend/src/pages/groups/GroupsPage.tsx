@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Building2, CheckSquare, Copy, Eye, History, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Building2, CheckSquare, ClipboardList, Copy, Eye, History, Pencil, Plus, Trash2, X } from 'lucide-react'
 import clsx from 'clsx'
 import { api, errorMessage, fileUrl } from '@/lib/api'
 import { useAuth, useGroup, useMe } from '@/lib/auth'
@@ -11,6 +11,7 @@ import { HistoryModal } from '@/components/HistoryModal'
 import { useToast } from '@/components/toast'
 import { GroupFormModal } from './GroupFormModal'
 import { CopyGroupModal } from './CopyGroupModal'
+import { GroupActivityModal } from './GroupActivityModal'
 import type { GroupRow } from './types'
 
 export default function GroupsPage() {
@@ -25,6 +26,7 @@ export default function GroupsPage() {
   const [copying, setCopying] = useState<GroupRow | null>(null)
   const [deleting, setDeleting] = useState<GroupRow | null>(null)
   const [history, setHistory] = useState<GroupRow | null>(null)
+  const [activity, setActivity] = useState<GroupRow | null>(null)
 
   const groups = useQuery({
     queryKey: ['groups'],
@@ -141,6 +143,11 @@ export default function GroupsPage() {
               <History className="h-4 w-4" />
             </button>
           )}
+          {isAdmin(me) && (
+            <button className="btn-icon" title="Group activity (everything that happened, exportable)" onClick={() => setActivity(g)}>
+              <ClipboardList className="h-4 w-4" />
+            </button>
+          )}
           {g.canDelete && (
             <button className="btn-icon hover:text-destructive" title="Delete" onClick={() => setDeleting(g)}>
               <Trash2 className="h-4 w-4" />
@@ -185,6 +192,7 @@ export default function GroupsPage() {
       {history && (
         <HistoryModal open onClose={() => setHistory(null)} entityType="Group" entityId={history.id} title={`History — ${history.name}`} />
       )}
+      <GroupActivityModal group={activity} onClose={() => setActivity(null)} />
       <ConfirmDialog
         open={!!deleting}
         message={`Are you sure you want to delete the "${deleting?.name}" group?`}

@@ -25,6 +25,7 @@ const pages: Record<string, () => Promise<unknown>> = {
   '/work-instructions': () => import('@/pages/workinstructions/WorkInstructionsPage'),
   '/settings': () => import('@/pages/settings/SystemSettingsPage'),
   '/access': () => import('@/pages/access/PageAccessPage'),
+  '/login-activity': () => import('@/pages/access/LoginActivityPage'),
 }
 
 /** Pages opened from a list row (…/:id) carry their own code. */
