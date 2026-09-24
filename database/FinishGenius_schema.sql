@@ -2055,3 +2055,88 @@ END;
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923234715_ColorSampleConditions'
+)
+BEGIN
+    ALTER TABLE [fg].[ColorSamples] ADD [ColorantsJson] nvarchar(max) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923234715_ColorSampleConditions'
+)
+BEGIN
+    ALTER TABLE [fg].[ColorSamples] ADD [DryingConditions] nvarchar(400) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923234715_ColorSampleConditions'
+)
+BEGIN
+    ALTER TABLE [fg].[ColorSamples] ADD [ExistingFinish] nvarchar(400) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923234715_ColorSampleConditions'
+)
+BEGIN
+    ALTER TABLE [fg].[ColorSamples] ADD [GrainDirection] nvarchar(400) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923234715_ColorSampleConditions'
+)
+BEGIN
+    ALTER TABLE [fg].[ColorSamples] ADD [GrowthRings] nvarchar(400) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923234715_ColorSampleConditions'
+)
+BEGIN
+    ALTER TABLE [fg].[ColorSamples] ADD [MoisturePercent] float NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923234715_ColorSampleConditions'
+)
+BEGIN
+    ALTER TABLE [fg].[ColorSamples] ADD [Porosity] nvarchar(400) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923234715_ColorSampleConditions'
+)
+BEGIN
+    ALTER TABLE [fg].[ColorSamples] ADD [SprayGun] nvarchar(400) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923234715_ColorSampleConditions'
+)
+BEGIN
+    ALTER TABLE [fg].[ColorSamples] ADD [SprayPressurePsi] float NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [fg].[__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260923234715_ColorSampleConditions'
+)
+BEGIN
+    INSERT INTO [fg].[__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20260923234715_ColorSampleConditions', N'10.0.12');
+END;
+
+COMMIT;
+GO
+
