@@ -40,6 +40,16 @@ public class ColorSample : GroupOwned
     public double? WoodL { get; set; }
     public double? WoodA { get; set; }
     public double? WoodB { get; set; }
+    /// <summary>Flat sawn, rift, quartered — the face decides how much stain the grain takes.</summary>
+    public string? GrainDirection { get; set; }
+    /// <summary>Open, medium or closed pore.</summary>
+    public string? Porosity { get; set; }
+    /// <summary>Tight, medium or wide growth rings.</summary>
+    public string? GrowthRings { get; set; }
+    /// <summary>What was already on the wood, if anything (an old finish changes everything).</summary>
+    public string? ExistingFinish { get; set; }
+    /// <summary>Moisture content in percent, where a meter was used.</summary>
+    public double? MoisturePercent { get; set; }
 
     // ---- the stain
     /// <summary>The formula used, when it is one of this group's formulas.</summary>
@@ -55,6 +65,12 @@ public class ColorSample : GroupOwned
     /// <summary>Wet film thickness in mils.</summary>
     public double? WetFilmMils { get; set; }
     public int? FlashMinutes { get; set; }
+    /// <summary>The gun used, when sprayed (e.g. "Kremlin").</summary>
+    public string? SprayGun { get; set; }
+    /// <summary>Gun pressure in psi.</summary>
+    public double? SprayPressurePsi { get; set; }
+    /// <summary>How it dried: temperature, humidity, time — as the shop recorded it.</summary>
+    public string? DryingConditions { get; set; }
     public string? Sealer { get; set; }
     public string? Topcoat { get; set; }
     /// <summary>Sheen of the topcoat, in percent.</summary>
@@ -69,6 +85,12 @@ public class ColorSample : GroupOwned
     /// <summary>Photograph of the finished sample (<c>color-samples/{groupId}/…</c>).</summary>
     public string? PhotoFile { get; set; }
     public string? Notes { get; set; }
+    /// <summary>
+    /// What was actually in the formula when this sample was made, as JSON: each colorant with its grams and its
+    /// share of the batch. The requirements' training table is per colorant (Dye A %, Dye B %, Pigment %), and a
+    /// formula gets edited over the years — so the recipe is copied onto the sample instead of being looked up later.
+    /// </summary>
+    public string? ColorantsJson { get; set; }
 
     public int? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

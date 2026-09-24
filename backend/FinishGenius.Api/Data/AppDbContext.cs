@@ -108,6 +108,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Entity<WorkInstruction>().Property(p).HasMaxLength(4000);
 
         b.Entity<ColorSample>().Property(x => x.Notes).HasMaxLength(4000);
+        b.Entity<ColorSample>().Property(x => x.ColorantsJson).HasMaxLength(int.MaxValue);
         b.Entity<ColorSample>().HasIndex(x => new { x.GroupId, x.WoodSpecies });
         b.Entity<ColorSample>().HasIndex(x => x.FormulaId);
 

@@ -23,6 +23,13 @@ export const METHODS = [
   { value: 9, label: 'Other' },
 ] as const
 
+/** The recipe as it stood when a sample was made. */
+export interface Colorants {
+  capturedAt: string
+  totalGrams: number
+  colorants: { materialId: number; productName: string; productCode?: string | null; materialType: number; grams: number; percent: number }[]
+}
+
 export interface ColorSampleRow {
   id: number
   groupId: number
@@ -30,6 +37,11 @@ export interface ColorSampleRow {
   woodSpecies: string
   sandingGrit?: number | null
   wood?: LabColor | null
+  grainDirection?: string | null
+  porosity?: string | null
+  growthRings?: string | null
+  existingFinish?: string | null
+  moisturePercent?: number | null
   formulaId?: number | null
   formulaName: string
   concentration?: number | null
@@ -37,6 +49,9 @@ export interface ColorSampleRow {
   coats?: number | null
   wetFilmMils?: number | null
   flashMinutes?: number | null
+  sprayGun?: string | null
+  sprayPressurePsi?: number | null
+  dryingConditions?: string | null
   sealer?: string | null
   topcoat?: string | null
   sheen?: number | null
@@ -45,6 +60,7 @@ export interface ColorSampleRow {
   measuredAt?: string | null
   photoFile?: string | null
   notes?: string | null
+  colorants?: Colorants | null
   createdAt: string
   updatedAt?: string | null
 }
@@ -68,6 +84,7 @@ export interface ColorMatchRow {
   confidence: number
   basis: string
   source: number
+  colorants?: Colorants | null
 }
 
 export interface ColorMatchResult {
@@ -85,6 +102,11 @@ export interface PhotoReading {
   correctionDeltaE: number
   note: string
 }
+
+/** What the wood looked like before staining — the conditions the requirements say change the result. */
+export const GRAIN_DIRECTIONS = ['Flat sawn', 'Rift sawn', 'Quarter sawn', 'End grain', 'Mixed'] as const
+export const POROSITIES = ['Open pore', 'Medium pore', 'Closed pore'] as const
+export const GROWTH_RINGS = ['Tight', 'Medium', 'Wide'] as const
 
 /** A box drawn on a photo, in fractions of its width and height. */
 export interface Region {

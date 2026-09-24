@@ -30,6 +30,11 @@ public static class LegacyTables
                 WoodL          FLOAT           NULL,
                 WoodA          FLOAT           NULL,
                 WoodB          FLOAT           NULL,
+                GrainDirection NVARCHAR(100)   NULL,
+                Porosity       NVARCHAR(100)   NULL,
+                GrowthRings    NVARCHAR(100)   NULL,
+                ExistingFinish NVARCHAR(200)   NULL,
+                MoisturePercent FLOAT          NULL,
                 FormulaId      INT             NULL,
                 FormulaName    NVARCHAR(400)   NOT NULL,
                 Concentration  FLOAT           NULL,
@@ -37,6 +42,9 @@ public static class LegacyTables
                 Coats          INT             NULL,
                 WetFilmMils    FLOAT           NULL,
                 FlashMinutes   INT             NULL,
+                SprayGun       NVARCHAR(200)   NULL,
+                SprayPressurePsi FLOAT         NULL,
+                DryingConditions NVARCHAR(400) NULL,
                 Sealer         NVARCHAR(200)   NULL,
                 Topcoat        NVARCHAR(200)   NULL,
                 Sheen          FLOAT           NULL,
@@ -47,6 +55,7 @@ public static class LegacyTables
                 MeasuredAt     DATETIME2(0)    NULL,
                 PhotoFile      NVARCHAR(400)   NULL,
                 Notes          NVARCHAR(4000)  NULL,
+                ColorantsJson  NVARCHAR(MAX)   NULL,
                 CreatedBy      INT             NULL,
                 CreatedAt      DATETIME2(0)    NOT NULL,
                 UpdatedAt      DATETIME2(0)    NULL,
@@ -56,6 +65,20 @@ public static class LegacyTables
             CREATE INDEX IX_{ColorSamples}_Formula ON dbo.{ColorSamples} (FormulaId);
         END
         """;
+
+    /// <summary>
+    /// Columns added after the table first shipped. A site that already has the table gets them here, so an upgrade
+    /// needs nothing run by hand.
+    /// </summary>
+    private static readonly (string Name, string Type)[] LaterColumns =
+    [
+        ("GrainDirection", "NVARCHAR(100) NULL"), ("Porosity", "NVARCHAR(100) NULL"), ("GrowthRings", "NVARCHAR(100) NULL"),
+        ("ExistingFinish", "NVARCHAR(200) NULL"), ("MoisturePercent", "FLOAT NULL"), ("SprayGun", "NVARCHAR(200) NULL"),
+        ("SprayPressurePsi", "FLOAT NULL"), ("DryingConditions", "NVARCHAR(400) NULL"), ("ColorantsJson", "NVARCHAR(MAX) NULL"),
+    ];
+
+    private static readonly string AddColorSampleColumns = string.Join(Environment.NewLine, LaterColumns.Select(c =>
+        $"IF COL_LENGTH(N'dbo.{ColorSamples}', N'{c.Name}') IS NULL ALTER TABLE dbo.{ColorSamples} ADD {c.Name} {c.Type};"));
 
     /// <summary>Creates the colour-sample table if this database is the old site's and does not have it yet.</summary>
     public static async Task EnsureColorSamplesAsync(AppDbContext db, CancellationToken token = default)
@@ -68,6 +91,7 @@ public static class LegacyTables
         {
             if (Ready.Contains(key)) return;
             await db.Database.ExecuteSqlRawAsync(CreateColorSamples, token);
+            await db.Database.ExecuteSqlRawAsync(AddColorSampleColumns, token);
             Ready.Add(key);
         }
         catch (SqlException e)

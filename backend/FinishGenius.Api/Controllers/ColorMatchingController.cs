@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FinishGenius.Api.Data;
 using FinishGenius.Api.Domain;
 using FinishGenius.Api.Infrastructure;
@@ -23,8 +24,10 @@ public class ColorMatchingController(
 
     public record SampleInput(
         int GroupId, string? Name, string? WoodSpecies, int? SandingGrit, double? WoodL, double? WoodA, double? WoodB,
+        string? GrainDirection, string? Porosity, string? GrowthRings, string? ExistingFinish, double? MoisturePercent,
         int? FormulaId, string? FormulaName, double? Concentration, ApplicationMethod? Method, int? Coats,
-        double? WetFilmMils, int? FlashMinutes, string? Sealer, string? Topcoat, double? Sheen,
+        double? WetFilmMils, int? FlashMinutes, string? SprayGun, double? SprayPressurePsi, string? DryingConditions,
+        string? Sealer, string? Topcoat, double? Sheen,
         double FinalL, double FinalA, double FinalB, ColorSource Source, DateTime? MeasuredAt, string? Notes, string? PhotoFile);
 
     public record MatchRequest(int GroupId, double L, double A, double B, string? WoodSpecies, string? Topcoat,
@@ -108,7 +111,7 @@ public class ColorMatchingController(
 
     // ---------------------------------------------------------------- reading colour off a photo
 
-    public record ReadPhotoRequest(int GroupId, string StoredFile, PhotoRegion Sample, PhotoRegion? Card, string? CardType);
+    public record ReadPhotoRequest(int GroupId, string StoredFile, PhotoRegion Sample, PhotoRegion? Card, string? CardType, PhotoRegion? Chart);
 
     /// <summary>POST /api/color-matching/read-photo — the colour inside the marked area, corrected by a grey/white card.</summary>
     [HttpPost("read-photo")]
@@ -118,12 +121,26 @@ public class ColorMatchingController(
         if (!OperatingSystem.IsWindows()) throw ApiException.Bad("Reading colour from a photo needs the Windows server.");
         var full = files.ResolveExisting(r.StoredFile) ?? throw ApiException.NotFound("Photo");
         var cardL = r.CardType?.Equals("white", StringComparison.OrdinalIgnoreCase) == true ? PhotoColorService.WhiteCardL : PhotoColorService.GreyCardL;
-        var reading = photos.Read(full, r.Sample, r.Card, cardL);
+        // A 24-patch chart says more than a single card, so it wins whenever one was marked.
+        var reading = r.Chart != null ? photos.ReadWithChart(full, r.Sample, r.Chart) : photos.Read(full, r.Sample, r.Card, cardL);
         return Ok(new
         {
             l = Math.Round(reading.Lab.L, 2), a = Math.Round(reading.Lab.A, 2), b = Math.Round(reading.Lab.B, 2),
             reading.Hex, reading.Calibrated, correctionDeltaE = Math.Round(reading.CorrectionDeltaE, 2), reading.Note,
         });
+    }
+
+    public record SuggestRequest(int GroupId, string StoredFile);
+
+    /// <summary>POST /api/color-matching/suggest-regions — where the wood and the ColorChecker appear to be.</summary>
+    [HttpPost("suggest-regions")]
+    public async Task<IActionResult> SuggestRegions(SuggestRequest r)
+    {
+        await me.EnsureGroupAsync(r.GroupId);
+        if (!OperatingSystem.IsWindows()) throw ApiException.Bad("Finding the wood in a photo needs the Windows server.");
+        var full = files.ResolveExisting(r.StoredFile) ?? throw ApiException.NotFound("Photo");
+        var found = photos.Suggest(full);
+        return Ok(new { sample = found.Sample, chart = found.Chart, found.Note });
     }
 
     // ---------------------------------------------------------------- matching and prediction
@@ -155,6 +172,8 @@ public class ColorMatchingController(
                 confidence = Math.Round(c.Confidence * 100),
                 c.Basis,
                 source = c.Sample.Source,
+                // The recipe as it was when that sample was made — the per-colorant answer the requirements ask for.
+                colorants = Colorants(c.Sample),
             }),
         });
     }
@@ -217,10 +236,19 @@ public class ColorMatchingController(
                           ?? throw ApiException.NotFound("Formula");
             await me.EnsureGroupAsync(formula.GroupId);
             if (s.FormulaName.Length == 0) s.FormulaName = formula.Name;
+            s.ColorantsJson = await ColorantsOfAsync(fid);
         }
         if (s.FormulaName.Length == 0) throw ApiException.Bad("Pick the formula that was used, or type its name.");
 
+        s.GrainDirection = input.GrainDirection?.Trim();
+        s.Porosity = input.Porosity?.Trim();
+        s.GrowthRings = input.GrowthRings?.Trim();
+        s.ExistingFinish = input.ExistingFinish?.Trim();
+        s.MoisturePercent = input.MoisturePercent;
         s.Concentration = input.Concentration;
+        s.SprayGun = input.SprayGun?.Trim();
+        s.SprayPressurePsi = input.SprayPressurePsi;
+        s.DryingConditions = input.DryingConditions?.Trim();
         s.Method = input.Method;
         s.Coats = input.Coats;
         s.WetFilmMils = input.WetFilmMils;
@@ -240,13 +268,59 @@ public class ColorMatchingController(
 
     private static string Read(ColorSample s) => $"L* {s.FinalL:0.##} a* {s.FinalA:0.##} b* {s.FinalB:0.##}";
 
+    private static readonly JsonSerializerOptions CamelCase = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    /// <summary>
+    /// The recipe as it stands today, copied onto the sample: each ingredient with its grams and its share of the
+    /// batch. A formula gets edited over the years, so a sample that only pointed at it would slowly start lying about
+    /// what was on the wood — and per-colorant percentages are what a formulation model would have to learn from.
+    /// </summary>
+    private async Task<string?> ColorantsOfAsync(int formulaId)
+    {
+        var lines = await db.FormulaIngredients.AsNoTracking()
+            .Where(i => i.FormulaId == formulaId)
+            .Select(i => new
+            {
+                i.MaterialId, i.Grams, i.Material!.ProductName, i.Material.ProductCode,
+                MaterialType = (int)i.Material.MaterialType, i.Sequence,
+            })
+            .OrderBy(i => i.Sequence).ToListAsync();
+        if (lines.Count == 0) return null;
+        var total = lines.Sum(l => (double)l.Grams);
+        var colorants = lines.Select(l => new
+        {
+            l.MaterialId, l.ProductName, l.ProductCode, l.MaterialType,
+            Grams = Math.Round((double)l.Grams, 4),
+            Percent = total > 0 ? Math.Round((double)l.Grams / total * 100, 3) : 0,
+        });
+        // camelCase like every other response: this JSON is handed to the screens as it is stored.
+        return JsonSerializer.Serialize(new { capturedAt = DateTime.UtcNow, totalGrams = Math.Round(total, 4), colorants }, CamelCase);
+    }
+
+    /// <summary>The stored recipe, back as JSON for the screens (null when the sample never had one).</summary>
+    private static JsonElement? Colorants(ColorSample s)
+    {
+        if (string.IsNullOrWhiteSpace(s.ColorantsJson)) return null;
+        try
+        {
+            return JsonDocument.Parse(s.ColorantsJson).RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static object Describe(ColorSample s) => new
     {
         s.Id, s.GroupId, s.Name, s.WoodSpecies, s.SandingGrit,
         wood = s.WoodL != null && s.WoodA != null && s.WoodB != null
             ? new { l = s.WoodL, a = s.WoodA, b = s.WoodB, hex = ColorScience.LabToHex(new Lab(s.WoodL.Value, s.WoodA.Value, s.WoodB.Value)) }
             : null,
-        s.FormulaId, s.FormulaName, s.Concentration, s.Method, s.Coats, s.WetFilmMils, s.FlashMinutes, s.Sealer, s.Topcoat, s.Sheen,
+        s.GrainDirection, s.Porosity, s.GrowthRings, s.ExistingFinish, s.MoisturePercent,
+        s.FormulaId, s.FormulaName, s.Concentration, s.Method, s.Coats, s.WetFilmMils, s.FlashMinutes,
+        s.SprayGun, s.SprayPressurePsi, s.DryingConditions, s.Sealer, s.Topcoat, s.Sheen,
+        colorants = Colorants(s),
         final = new { l = s.FinalL, a = s.FinalA, b = s.FinalB, hex = ColorScience.LabToHex(new Lab(s.FinalL, s.FinalA, s.FinalB)) },
         s.Source, s.MeasuredAt, s.PhotoFile, s.Notes, s.CreatedAt, s.UpdatedAt,
     };

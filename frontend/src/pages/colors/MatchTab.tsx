@@ -158,6 +158,16 @@ export function MatchTab({ groupId, samples, onNewSample }: {
                           {` · ${sourceLabel(m.source)}`}
                         </div>
                         <div className="mt-0.5 text-xs text-muted-foreground">{m.basis}</div>
+                        {m.colorants && m.colorants.colorants.length > 0 && (
+                          <ul className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+                            {m.colorants.colorants.map((c) => (
+                              <li key={c.materialId} className="tabular-nums">
+                                <span className="text-muted-foreground">{c.productName}</span>{' '}
+                                <span className="font-medium">{c.percent}%</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
                     </li>
                   ))}

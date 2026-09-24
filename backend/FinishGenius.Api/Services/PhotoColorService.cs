@@ -12,6 +12,9 @@ public record PhotoRegion(double X, double Y, double Width, double Height);
 /// <summary>What a photograph says a colour is, and how much the lighting had to be corrected to say it.</summary>
 public record PhotoReading(Lab Lab, string Hex, bool Calibrated, double CorrectionDeltaE, string Note);
 
+/// <summary>Areas the app found by itself, for the operator to accept or drag over.</summary>
+public record SuggestedRegions(PhotoRegion? Sample, PhotoRegion? Chart, string Note);
+
 /// <summary>
 /// Reads colour out of a photograph, and paints a predicted colour onto one.
 ///
@@ -26,6 +29,75 @@ public class PhotoColorService(ILogger<PhotoColorService> log)
     /// <summary>Middle grey and white cards, as their makers specify them (L* under D65).</summary>
     public const double GreyCardL = 50.0;
     public const double WhiteCardL = 96.0;
+
+    /// <summary>
+    /// The colour inside <paramref name="sample"/>, corrected against a 24-patch ColorChecker where one was marked.
+    /// The chart says how the camera and the light bent every colour, not only how bright the light was, so this is
+    /// the reading to prefer whenever the chart is in the shot.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    public PhotoReading ReadWithChart(string imagePath, PhotoRegion sample, PhotoRegion chart)
+    {
+        using var bitmap = new Bitmap(imagePath);
+        var sampleRgb = Average(bitmap, sample) ?? throw ApiException.Bad("The selected area of the photo is empty — draw the box over the wood.");
+
+        // The chart may be laid down any way round; the orientation that fits the known colours best is the right one.
+        Correction? best = null;
+        foreach (var rotation in new[] { 0, 90, 180, 270 })
+        {
+            var measured = ReadPatches(bitmap, chart, rotation);
+            if (measured == null) continue;
+            var fit = ColorChecker.Fit(measured);
+            if (best == null || fit.ResidualDeltaE < best.Fit.ResidualDeltaE) best = new Correction(fit, rotation);
+        }
+        if (best == null) throw ApiException.Bad("The marked area is too small to read a ColorChecker from — draw the box around the whole chart.");
+
+        var corrected = best.Fit.Apply(sampleRgb);
+        var lab = ColorScience.RgbToLab(corrected);
+        var note = best.Fit.ResidualDeltaE > 4
+            ? $"The chart still reads ΔE {best.Fit.ResidualDeltaE:0.#} out after correcting (it was {best.Fit.OriginalDeltaE:0.#}). " +
+              "Check the box is tight around the chart, the light is even, and nothing is glaring off it."
+            : $"Corrected against all 24 chart patches: the photo was ΔE {best.Fit.OriginalDeltaE:0.#} out, now {best.Fit.ResidualDeltaE:0.#}.";
+        return new PhotoReading(lab, ColorScience.LabToHex(lab), true, best.Fit.OriginalDeltaE, note);
+    }
+
+    private sealed record Correction(ColorChecker.Correction Fit, int Rotation);
+
+    /// <summary>The 24 patch colours, read out of the marked chart at the given rotation (null when it is too small).</summary>
+    [SupportedOSPlatform("windows")]
+    private static List<Rgb>? ReadPatches(Bitmap bitmap, PhotoRegion chart, int rotation)
+    {
+        var rect = ToRectangle(bitmap, chart);
+        var landscape = rotation is 0 or 180;
+        int cols = landscape ? ColorChecker.Columns : ColorChecker.Rows;
+        int rows = landscape ? ColorChecker.Rows : ColorChecker.Columns;
+        if (rect.Width < cols * 8 || rect.Height < rows * 8) return null;
+
+        var cellW = rect.Width / (double)cols;
+        var cellH = rect.Height / (double)rows;
+        var patches = new Rgb[ColorChecker.Patches.Length];
+        for (var row = 0; row < rows; row++)
+        for (var col = 0; col < cols; col++)
+        {
+            // Only the middle of each patch is read, so the printed border and any shadow in the gaps are left out.
+            var region = new PhotoRegion(
+                (rect.Left + (col + 0.3) * cellW) / bitmap.Width,
+                (rect.Top + (row + 0.3) * cellH) / bitmap.Height,
+                cellW * 0.4 / bitmap.Width,
+                cellH * 0.4 / bitmap.Height);
+            var colour = Average(bitmap, region);
+            if (colour == null) return null;
+            var index = rotation switch
+            {
+                0 => row * ColorChecker.Columns + col,
+                180 => (ColorChecker.Rows - 1 - row) * ColorChecker.Columns + (ColorChecker.Columns - 1 - col),
+                90 => (ColorChecker.Rows - 1 - col) * ColorChecker.Columns + row,
+                _ => col * ColorChecker.Columns + (ColorChecker.Columns - 1 - row),
+            };
+            patches[index] = colour.Value;
+        }
+        return patches.ToList();
+    }
 
     /// <summary>
     /// The average colour inside <paramref name="sample"/>. When <paramref name="card"/> is given, the picture is
@@ -103,6 +175,156 @@ public class PhotoColorService(ILogger<PhotoColorService> log)
         w = Math.Min(w, bitmap.Width - x);
         h = Math.Min(h, bitmap.Height - y);
         return new Rectangle(x, y, Math.Max(0, w), Math.Max(0, h));
+    }
+
+    /// <summary>
+    /// Where the wood and the chart appear to be. The wood is the largest even, wood-coloured area; the chart is the
+    /// block of many strong colours next to it. It is a suggestion to save dragging — the operator sees both boxes and
+    /// can move them, and a wrong guess costs nothing because the reading is taken from whatever the boxes end up on.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    public SuggestedRegions Suggest(string imagePath)
+    {
+        const int gridX = 32, gridY = 24;
+        using var bitmap = new Bitmap(imagePath);
+        var lab = new Lab[gridY, gridX];
+        var chroma = new double[gridY, gridX];
+        for (var y = 0; y < gridY; y++)
+        for (var x = 0; x < gridX; x++)
+        {
+            var region = new PhotoRegion(x / (double)gridX, y / (double)gridY, 1.0 / gridX, 1.0 / gridY);
+            var rgb = Average(bitmap, region) ?? new Rgb(0, 0, 0);
+            lab[y, x] = ColorScience.RgbToLab(rgb);
+            chroma[y, x] = Math.Sqrt(lab[y, x].A * lab[y, x].A + lab[y, x].B * lab[y, x].B);
+        }
+
+        // How much each tile disagrees with its neighbours: even boards sit low, printed patches sit high. The line
+        // between them is drawn from this picture rather than from a fixed number, because grain varies so much.
+        var spread = new double[gridY, gridX];
+        var all = new List<double>(gridX * gridY);
+        for (var y = 0; y < gridY; y++)
+        for (var x = 0; x < gridX; x++)
+        {
+            spread[y, x] = NeighbourSpread(lab, x, y, gridX, gridY);
+            all.Add(spread[y, x]);
+        }
+        all.Sort();
+        var median = all[all.Count / 2];
+        var even = Math.Max(8, median * 1.5);       // still looks like one surface
+        var busy = Math.Max(20, median * 3);        // a block of many different printed colours
+
+        // Wood: an even surface with some colour in it.
+        var wood = new bool[gridY, gridX];
+        for (var y = 0; y < gridY; y++)
+        for (var x = 0; x < gridX; x++)
+        {
+            // Not by hue: the photo may well have a colour cast on it, which is the very thing being corrected.
+            // A board is simply the biggest evenly-coloured thing that is neither black, blown out, nor dead grey.
+            var l = lab[y, x];
+            var woodish = l.L is > 12 and < 95 && chroma[y, x] is > 3 and < 70;
+            wood[y, x] = woodish && spread[y, x] <= even;
+        }
+        var woodBox = LargestRectangle(wood, gridX, gridY);
+
+        // Chart: strong colours that disagree with their neighbours — 24 printed patches in a small block. Its greyscale
+        // row is not "busy" at all, so the busy core is grown outwards over anything that is still not plain board.
+        var chart = new bool[gridY, gridX];
+        for (var y = 0; y < gridY; y++)
+        for (var x = 0; x < gridX; x++)
+            chart[y, x] = !wood[y, x] && spread[y, x] >= busy;
+        var chartBox = Grow(LargestRectangle(chart, gridX, gridY), wood, gridX, gridY);
+
+        // A suggested chart is only offered if reading it actually works: the 24 patches are fitted here and the box is
+        // dropped when the fit is poor, so nobody is handed a confident-looking reading taken from the wrong place.
+        PhotoRegion? chartRegion = null;
+        if (chartBox is { } cb)
+        {
+            var region = Box(cb, gridX, gridY);
+            var patches = ReadPatches(bitmap, region, 0) ?? ReadPatches(bitmap, region, 90);
+            if (patches != null && ColorChecker.Fit(patches).ResidualDeltaE <= 6) chartRegion = region;
+        }
+
+        var note = woodBox == null
+            ? "The wood could not be picked out — drag the boxes yourself."
+            : chartRegion == null
+                ? "Wood found. No ColorChecker was read: mark it yourself if it is in the shot."
+                : "Wood and chart found. Check both boxes before reading.";
+        return new SuggestedRegions(
+            woodBox is { } w ? Shrink(w, gridX, gridY) : null,
+            chartRegion,
+            note);
+    }
+
+    /// <summary>How much a tile's colour differs from the tiles around it (ΔE00).</summary>
+    private static double NeighbourSpread(Lab[,] lab, int x, int y, int gridX, int gridY)
+    {
+        double worst = 0;
+        for (var dy = -1; dy <= 1; dy++)
+        for (var dx = -1; dx <= 1; dx++)
+        {
+            var nx = x + dx;
+            var ny = y + dy;
+            if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= gridX || ny >= gridY) continue;
+            worst = Math.Max(worst, ColorScience.DeltaE2000(lab[y, x], lab[ny, nx]));
+        }
+        return worst;
+    }
+
+    /// <summary>The biggest solid block of true tiles (largest rectangle in a histogram, row by row).</summary>
+    private static (int X, int Y, int W, int H)? LargestRectangle(bool[,] grid, int gridX, int gridY)
+    {
+        var heights = new int[gridX];
+        (int X, int Y, int W, int H)? best = null;
+        var bestArea = 8; // anything smaller is noise, not a board
+        for (var y = 0; y < gridY; y++)
+        {
+            for (var x = 0; x < gridX; x++) heights[x] = grid[y, x] ? heights[x] + 1 : 0;
+            for (var left = 0; left < gridX; left++)
+            {
+                var minHeight = int.MaxValue;
+                for (var right = left; right < gridX; right++)
+                {
+                    minHeight = Math.Min(minHeight, heights[right]);
+                    if (minHeight == 0) break;
+                    var area = minHeight * (right - left + 1);
+                    if (area > bestArea)
+                    {
+                        bestArea = area;
+                        best = (left, y - minHeight + 1, right - left + 1, minHeight);
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// Stretches a box outwards while the next row or column is still not plain board — the chart's grey patches do not
+    /// look "busy", so the colourful core alone always stops short of the whole chart.
+    /// </summary>
+    private static (int X, int Y, int W, int H)? Grow((int X, int Y, int W, int H)? box, bool[,] wood, int gridX, int gridY)
+    {
+        if (box is not { } b) return null;
+        bool FreeColumn(int x) => x >= 0 && x < gridX && Enumerable.Range(b.Y, b.H).All(y => !wood[y, x]);
+        bool FreeRow(int y) => y >= 0 && y < gridY && Enumerable.Range(b.X, b.W).All(x => !wood[y, x]);
+        for (var i = 0; i < 4 && FreeColumn(b.X - 1); i++) b = b with { X = b.X - 1, W = b.W + 1 };
+        for (var i = 0; i < 4 && FreeColumn(b.X + b.W); i++) b = b with { W = b.W + 1 };
+        for (var i = 0; i < 4 && FreeRow(b.Y - 1); i++) b = b with { Y = b.Y - 1, H = b.H + 1 };
+        for (var i = 0; i < 4 && FreeRow(b.Y + b.H); i++) b = b with { H = b.H + 1 };
+        return b;
+    }
+
+    /// <summary>Tiles to a fraction-of-the-picture box, exactly as found.</summary>
+    private static PhotoRegion Box((int X, int Y, int W, int H) box, int gridX, int gridY) =>
+        new(box.X / (double)gridX, box.Y / (double)gridY, box.W / (double)gridX, box.H / (double)gridY);
+
+    /// <summary>Tiles to a fraction-of-the-picture box, pulled in a little so it cannot sit on an edge.</summary>
+    private static PhotoRegion Shrink((int X, int Y, int W, int H) box, int gridX, int gridY)
+    {
+        var inset = 0.15;
+        var x = (box.X + box.W * inset) / gridX;
+        var y = (box.Y + box.H * inset) / gridY;
+        return new PhotoRegion(x, y, box.W * (1 - inset * 2) / gridX, box.H * (1 - inset * 2) / gridY);
     }
 
     /// <summary>

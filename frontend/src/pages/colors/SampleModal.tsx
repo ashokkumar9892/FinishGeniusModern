@@ -7,13 +7,18 @@ import { ErrorBanner, Field, Modal, Note } from '@/components/ui'
 import { SearchSelect } from '@/components/SearchSelect'
 import { useToast } from '@/components/toast'
 import { PhotoReader } from './PhotoReader'
-import { METHODS, SOURCES, type ColorSampleRow } from './types'
+import { GRAIN_DIRECTIONS, GROWTH_RINGS, METHODS, POROSITIES, SOURCES, type ColorSampleRow } from './types'
 
 interface FormState {
   name: string
   woodSpecies: string
   sandingGrit: string
   woodL: string; woodA: string; woodB: string
+  grainDirection: string
+  porosity: string
+  growthRings: string
+  existingFinish: string
+  moisturePercent: string
   formulaId: number | null
   formulaName: string
   concentration: string
@@ -21,6 +26,9 @@ interface FormState {
   coats: string
   wetFilmMils: string
   flashMinutes: string
+  sprayGun: string
+  sprayPressurePsi: string
+  dryingConditions: string
   sealer: string
   topcoat: string
   sheen: string
@@ -32,8 +40,10 @@ interface FormState {
 }
 
 const empty: FormState = {
-  name: '', woodSpecies: '', sandingGrit: '', woodL: '', woodA: '', woodB: '', formulaId: null, formulaName: '',
-  concentration: '', method: '1', coats: '', wetFilmMils: '', flashMinutes: '', sealer: '', topcoat: '', sheen: '',
+  name: '', woodSpecies: '', sandingGrit: '', woodL: '', woodA: '', woodB: '', grainDirection: '', porosity: '',
+  growthRings: '', existingFinish: '', moisturePercent: '', formulaId: null, formulaName: '',
+  concentration: '', method: '1', coats: '', wetFilmMils: '', flashMinutes: '', sprayGun: '', sprayPressurePsi: '',
+  dryingConditions: '', sealer: '', topcoat: '', sheen: '',
   finalL: '', finalA: '', finalB: '', source: '1', measuredAt: '', notes: '', photoFile: null,
 }
 
@@ -70,6 +80,10 @@ export function SampleModal({ open, onClose, groupId, sample }: {
         ? {
             name: sample.name, woodSpecies: sample.woodSpecies, sandingGrit: String(sample.sandingGrit ?? ''),
             woodL: String(sample.wood?.l ?? ''), woodA: String(sample.wood?.a ?? ''), woodB: String(sample.wood?.b ?? ''),
+            grainDirection: sample.grainDirection ?? '', porosity: sample.porosity ?? '', growthRings: sample.growthRings ?? '',
+            existingFinish: sample.existingFinish ?? '', moisturePercent: String(sample.moisturePercent ?? ''),
+            sprayGun: sample.sprayGun ?? '', sprayPressurePsi: String(sample.sprayPressurePsi ?? ''),
+            dryingConditions: sample.dryingConditions ?? '',
             formulaId: sample.formulaId ?? null, formulaName: sample.formulaName,
             concentration: String(sample.concentration ?? ''), method: String(sample.method ?? ''),
             coats: String(sample.coats ?? ''), wetFilmMils: String(sample.wetFilmMils ?? ''),
@@ -97,6 +111,14 @@ export function SampleModal({ open, onClose, groupId, sample }: {
         woodSpecies: form.woodSpecies.trim(),
         sandingGrit: num(form.sandingGrit),
         woodL: num(form.woodL), woodA: num(form.woodA), woodB: num(form.woodB),
+        grainDirection: form.grainDirection || null,
+        porosity: form.porosity || null,
+        growthRings: form.growthRings || null,
+        existingFinish: form.existingFinish.trim() || null,
+        moisturePercent: num(form.moisturePercent),
+        sprayGun: form.sprayGun.trim() || null,
+        sprayPressurePsi: num(form.sprayPressurePsi),
+        dryingConditions: form.dryingConditions.trim() || null,
         formulaId: form.formulaId,
         formulaName: form.formulaName.trim(),
         concentration: num(form.concentration),
@@ -137,6 +159,8 @@ export function SampleModal({ open, onClose, groupId, sample }: {
     wetFilmMils: badNumber(form.wetFilmMils, { min: 0 }),
     flashMinutes: badNumber(form.flashMinutes, { min: 0 }),
     sheen: badNumber(form.sheen, { min: 0, max: 100 }),
+    moisturePercent: badNumber(form.moisturePercent, { min: 0, max: 100 }),
+    sprayPressurePsi: badNumber(form.sprayPressurePsi, { min: 0, max: 5000 }),
     finalL: badNumber(form.finalL, { required: true, min: 0, max: 100 }),
     finalA: badNumber(form.finalA, { required: true, min: -128, max: 128 }),
     finalB: badNumber(form.finalB, { required: true, min: -128, max: 128 }),
@@ -178,6 +202,32 @@ export function SampleModal({ open, onClose, groupId, sample }: {
               <input className="input" type="date" value={form.measuredAt} onChange={(e) => set('measuredAt', e.target.value)} />
             </Field>
           </div>
+          <div className="grid gap-3 sm:grid-cols-4">
+            <Field label="Grain">
+              <select className="input" value={form.grainDirection} onChange={(e) => set('grainDirection', e.target.value)}>
+                <option value="">—</option>
+                {GRAIN_DIRECTIONS.map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </Field>
+            <Field label="Porosity">
+              <select className="input" value={form.porosity} onChange={(e) => set('porosity', e.target.value)}>
+                <option value="">—</option>
+                {POROSITIES.map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </Field>
+            <Field label="Growth rings">
+              <select className="input" value={form.growthRings} onChange={(e) => set('growthRings', e.target.value)}>
+                <option value="">—</option>
+                {GROWTH_RINGS.map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </Field>
+            <Field label="Moisture (%)" error={errors.moisturePercent ?? undefined}>
+              <input className={clsx('input tabular-nums', errors.moisturePercent && 'input-invalid')} inputMode="decimal" value={form.moisturePercent} onChange={(e) => set('moisturePercent', e.target.value)} />
+            </Field>
+          </div>
+          <Field label="Existing finish" hint="Anything already on the wood — leave empty for bare timber.">
+            <input className="input" value={form.existingFinish} onChange={(e) => set('existingFinish', e.target.value)} maxLength={200} />
+          </Field>
           <Field
             label="Unfinished wood colour (L* a* b*)"
             hint="Optional, and worth doing: it lets the same formula be predicted on a different board."
@@ -226,6 +276,17 @@ export function SampleModal({ open, onClose, groupId, sample }: {
             </Field>
             <Field label="Wet film (mils)" error={errors.wetFilmMils ?? undefined}>
               <input className={clsx('input tabular-nums', errors.wetFilmMils && 'input-invalid')} inputMode="decimal" value={form.wetFilmMils} onChange={(e) => set('wetFilmMils', e.target.value)} />
+            </Field>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="Spray gun" hint="Kremlin, Graco…">
+              <input className="input" value={form.sprayGun} onChange={(e) => set('sprayGun', e.target.value)} maxLength={200} />
+            </Field>
+            <Field label="Gun pressure (psi)" error={errors.sprayPressurePsi ?? undefined}>
+              <input className={clsx('input tabular-nums', errors.sprayPressurePsi && 'input-invalid')} inputMode="decimal" value={form.sprayPressurePsi} onChange={(e) => set('sprayPressurePsi', e.target.value)} />
+            </Field>
+            <Field label="Drying conditions" hint="e.g. 22 °C, 45% RH, overnight.">
+              <input className="input" value={form.dryingConditions} onChange={(e) => set('dryingConditions', e.target.value)} maxLength={400} />
             </Field>
           </div>
           <div className="grid gap-3 sm:grid-cols-4">
@@ -286,6 +347,18 @@ export function SampleModal({ open, onClose, groupId, sample }: {
             <Note tone="info">
               This sample is filed as a photo reading. Predictions lean on spectrophotometer readings first, and say so.
             </Note>
+          )}
+          {sample?.colorants && sample.colorants.colorants.length > 0 && (
+            <Field label="Recipe as recorded" hint={`Copied from the formula when this sample was made (${sample.colorants.totalGrams} g batch).`}>
+              <ul className="rounded-md border divide-y text-sm">
+                {sample.colorants.colorants.map((c) => (
+                  <li key={c.materialId} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                    <span className="truncate">{c.productName}{c.productCode ? ` · ${c.productCode}` : ''}</span>
+                    <span className="tabular-nums text-muted-foreground">{c.percent}% · {c.grams} g</span>
+                  </li>
+                ))}
+              </ul>
+            </Field>
           )}
           <Field label="Notes">
             <textarea className="input" rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} maxLength={4000} />

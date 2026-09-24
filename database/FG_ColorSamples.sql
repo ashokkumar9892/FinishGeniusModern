@@ -24,6 +24,11 @@ BEGIN
         WoodL          FLOAT           NULL,       -- the unfinished board, when it was measured
         WoodA          FLOAT           NULL,
         WoodB          FLOAT           NULL,
+        GrainDirection NVARCHAR(100)   NULL,       -- flat sawn, rift, quartered…
+        Porosity       NVARCHAR(100)   NULL,
+        GrowthRings    NVARCHAR(100)   NULL,
+        ExistingFinish NVARCHAR(200)   NULL,
+        MoisturePercent FLOAT          NULL,
         FormulaId      INT             NULL,       -- dbo.Materials (Discriminator 'Formulation'), when it is one of ours
         FormulaName    NVARCHAR(400)   NOT NULL,   -- kept as text too, so the sample still says what was on it
         Concentration  FLOAT           NULL,       -- percent
@@ -31,6 +36,9 @@ BEGIN
         Coats          INT             NULL,
         WetFilmMils    FLOAT           NULL,
         FlashMinutes   INT             NULL,
+        SprayGun       NVARCHAR(200)   NULL,
+        SprayPressurePsi FLOAT         NULL,
+        DryingConditions NVARCHAR(400) NULL,
         Sealer         NVARCHAR(200)   NULL,
         Topcoat        NVARCHAR(200)   NULL,
         Sheen          FLOAT           NULL,       -- percent
@@ -41,6 +49,8 @@ BEGIN
         MeasuredAt     DATETIME2(0)    NULL,
         PhotoFile      NVARCHAR(400)   NULL,
         Notes          NVARCHAR(4000)  NULL,
+        ColorantsJson  NVARCHAR(MAX)   NULL,       -- the recipe as it was when the sample was made
+
         CreatedBy      INT             NULL,
         CreatedAt      DATETIME2(0)    NOT NULL,
         UpdatedAt      DATETIME2(0)    NULL,

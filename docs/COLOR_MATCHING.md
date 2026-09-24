@@ -8,10 +8,17 @@ samples — is equipment and lab work, and no amount of code substitutes for it.
 
 ## What the app does today
 
-**Sample Library.** One row per finished sample: wood species and sanding grit, the unfinished board's own colour if it
-was measured, the formula and strength, how it was applied (spray/wipe, coats, wet film, flash), the sealer, topcoat and
-sheen, and the L\*a\*b\* it measured — with whether that reading came from a spectrophotometer, a photo or was typed in.
+**Sample Library.** One row per finished sample: wood species, sanding grit, grain direction, porosity, growth rings,
+existing finish and moisture content; the unfinished board's own colour if it was measured; the formula and strength;
+how it was applied (spray/wipe, coats, wet film, flash, gun, pressure, drying conditions); the sealer, topcoat and
+sheen; and the L\*a\*b\* it measured — with whether that reading came from a spectrophotometer, a photo or was typed in.
 This is the training database the requirements call the most important part of the project.
+
+**The recipe travels with the sample.** When a sample is linked to one of the group's formulas, the ingredients are
+copied onto it — each colorant with its grams and its share of the batch, which is the per-colorant table on page 6 of
+the requirements. A formula gets edited over the years, so a sample that only pointed at one would slowly start lying
+about what was on the wood. Those percentages are shown against each recommendation, and they are what a formulation
+model would eventually have to learn from.
 
 **Match a Colour.** Give it the colour you want and it ranks the recorded formulas by ΔE00, the colour difference an eye
 actually judges by. Where a formula has samples at two strengths, it reads the strength off the line between them —
@@ -23,15 +30,29 @@ on a device, whether the strength was interpolated.
 should leave it. The colour comes from the samples; the grain is the photograph's. It is a guide for a customer, not a
 substitute for a sample board.
 
-**Reading colour from a photo.** Put a grey or white card in the shot, mark the wood and the card, and the app corrects
-the lighting away and reports L\*a\*b\*. Without a card it still reads, but marks the reading uncalibrated, and
-predictions weigh device readings higher. Validated in testing: a board photographed under a strong warm light read
-ΔE ≈ 12 off before correction and within about ΔE 1 of truth after it.
+**Reading colour from a photo.** Put a **24-patch ColorChecker** in the shot (the chart page 2 of the requirements
+photographs), mark the wood and the chart, and the app fits a correction across all 24 patches — which undoes a colour
+cast, a wrong white balance and channel crosstalk together, not merely a brightness error. A single grey or white card
+is still accepted where that is all there is. Whichever is used, the app reports how far out the photo was and how far
+out it remains, and a reading with nothing to calibrate against is marked uncalibrated.
+
+Validated on a synthetic chart photographed under a heavy cast: the wood read a\* −3.3 / b\* 21.8 uncorrected against a
+truth of a\* 11.7 / b\* 30.2, and a\* 10.9 / b\* 29.9 after correcting — about ΔE 1. A grey card alone, under a warm
+light, went from ΔE 12 out to about ΔE 1.
+
+**Finding the areas.** "Find the areas" marks the board, and the chart when it can read one. The chart suggestion
+checks itself: it fits the 24 patches and only offers the box when the fit is good, so a mis-detected chart is never
+handed over as a confident reading. Both boxes can be dragged, and often the chart has to be.
 
 ## What it is not
 
 - **It is not a trained model.** There is no neural network and nothing is extrapolated. Every answer traces to samples
   someone measured; with no samples for a formula the app says exactly that instead of guessing.
+- **It cannot invent a formula.** It recommends a formula that has been recorded, and a strength between two that were
+  measured. Composing a new recipe for a colour nobody has mixed — pages 8-9 of the requirements — needs the sample
+  library first, and then a fit per colorant rather than per formula.
+- **There is no camera integration.** You upload a photograph from any camera; the app does not drive a camera, enforce
+  the capture conditions of section 1, or read RAW files.
 - **A photo is not a measurement.** A spectrophotometer reading is the ground truth the requirements ask for; the
   calibrated photo path exists so useful work can start before one is bought.
 - **The preview predicts colour, not finish.** Gloss, grain raise, blotching and how a dye moves in end grain are not
@@ -58,6 +79,7 @@ dataset has come.
 | Part | File |
 |------|------|
 | Colour maths (sRGB/Lab/OKLab, ΔE76, ΔE00) | `backend/FinishGenius.Api/Services/ColorScience.cs` |
+| ColorChecker reference values and the fit | `backend/FinishGenius.Api/Services/ColorChecker.cs` |
 | Matching, strength interpolation, confidence | `backend/FinishGenius.Api/Services/ColorMatchService.cs` |
 | Photo reading and the preview renderer | `backend/FinishGenius.Api/Services/PhotoColorService.cs` |
 | API (`/api/color-matching/...`) | `backend/FinishGenius.Api/Controllers/ColorMatchingController.cs` |

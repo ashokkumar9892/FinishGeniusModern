@@ -52,8 +52,18 @@ export function PreviewTab({ groupId, samples }: { groupId: number; samples: Col
     onSuccess: (d) => {
       setFile(d.storedFile)
       setWood(null)
+      suggest.mutate(d.storedFile) // the board is usually the big even area; the box can still be dragged
     },
     onError: (e) => toast.error(errorMessage(e)),
+  })
+
+  const suggest = useMutation({
+    mutationFn: async (storedFile: string) =>
+      (await api.post<{ sample: Region | null; note: string }>('/color-matching/suggest-regions', { groupId, storedFile })).data,
+    onSuccess: (d) => {
+      if (d.sample) setWood(d.sample)
+    },
+    onError: () => undefined, // dragging the box still works
   })
 
   const render = useMutation({
@@ -104,7 +114,14 @@ export function PreviewTab({ groupId, samples }: { groupId: number; samples: Col
           </Field>
 
           {file && (
-            <Field label="Drag a box over the bare wood" required hint="Away from shadows, edges and anything that is not the board.">
+            <Field
+              label="Drag a box over the bare wood"
+              required
+              hint="Away from shadows, edges and anything that is not the board."
+            >
+              <button type="button" className="btn-secondary btn-sm mb-2" disabled={suggest.isPending} onClick={() => file && suggest.mutate(file)}>
+                <Wand2 className="h-4 w-4" /> Find the wood
+              </button>
               <RegionPicker
                 src={fileUrl(file, false, null, 1200)}
                 active="wood"
